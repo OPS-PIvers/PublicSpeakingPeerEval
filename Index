@@ -1,0 +1,270 @@
+<script>
+// Set up form controls
+function setupFormControls() {
+  // Set up option buttons
+  setupOptionButtons('initialPositionOptions', 'initialPosition');
+  setupOptionButtons('positionChangeOptions', 'positionChange');
+  setupOptionButtons('mostConvincingOptions', 'mostConvincing');
+  setupOptionButtons('leastConvincingOptions', 'leastConvincing');
+  setupOptionButtons('didWellOptions', 'didWell');
+  setupOptionButtons('improvementOptions', 'improvement');
+  
+  // Set up rating options
+  setupRatingButtons('bodyScoreOptions', 'bodyScore');
+  setupRatingButtons('dictionScoreOptions', 'dictionScore');
+  setupRatingButtons('eyeContactScoreOptions', 'eyeContactScore');
+  setupRatingButtons('postureScoreOptions', 'postureScore');
+  
+  // Set up multi-select buttons
+  setupCheckboxButtons('rhetoricalDevicesOptions', 'rhetoricalDevices');
+  
+  // Set up comments toggles
+  setupCommentsToggle('bodyCommentsToggle', 'bodyCommentsBox');
+  setupCommentsToggle('dictionCommentsToggle', 'dictionCommentsBox');
+  setupCommentsToggle('deliveryCommentsToggle', 'deliveryCommentsBox');
+}
+
+// Set up option buttons (single select)
+function setupOptionButtons(containerId, hiddenInputId) {
+  const container = document.getElementById(containerId);
+  const hiddenInput = document.getElementById(hiddenInputId);
+  
+  if (!container || !hiddenInput) return;
+  
+  const buttons = container.querySelectorAll('.option-button');
+  
+  buttons.forEach(button => {
+    button.addEventListener('click', function() {
+      // Remove selected class from all buttons
+      buttons.forEach(btn => btn.classList.remove('selected'));
+      
+      // Add selected class to clicked button
+      this.classList.add('selected');
+      
+      // Update hidden input value
+      hiddenInput.value = this.getAttribute('data-value');
+    });
+  });
+}
+
+// Set up rating buttons
+function setupRatingButtons(containerId, hiddenInputId) {
+  const container = document.getElementById(containerId);
+  const hiddenInput = document.getElementById(hiddenInputId);
+  
+  if (!container || !hiddenInput) return;
+  
+  const buttons = container.querySelectorAll('.rating-button');
+  
+  buttons.forEach(button => {
+    button.addEventListener('click', function() {
+      // Remove selected class from all buttons
+      buttons.forEach(btn => btn.classList.remove('selected'));
+      
+      // Add selected class to clicked button
+      this.classList.add('selected');
+      
+      // Update hidden input value
+      hiddenInput.value = this.getAttribute('data-value');
+    });
+  });
+}
+
+// Set up checkbox buttons (multi-select)
+function setupCheckboxButtons(containerId, hiddenInputId) {
+  const container = document.getElementById(containerId);
+  const hiddenInput = document.getElementById(hiddenInputId);
+  
+  if (!container || !hiddenInput) return;
+  
+  const buttons = container.querySelectorAll('.checkbox-button');
+  
+  buttons.forEach(button => {
+    button.addEventListener('click', function() {
+      // Toggle selected class
+      this.classList.toggle('selected');
+      
+      // Update hidden input with all selected values
+      const selectedButtons = container.querySelectorAll('.checkbox-button.selected');
+      const selectedValues = Array.from(selectedButtons).map(btn => btn.getAttribute('data-value'));
+      hiddenInput.value = JSON.stringify(selectedValues);
+    });
+  });
+}
+
+// Set up comments toggle
+function setupCommentsToggle(toggleId, boxId) {
+  const toggle = document.getElementById(toggleId);
+  const box = document.getElementById(boxId);
+  
+  if (!toggle || !box) return;
+  
+  toggle.addEventListener('click', function() {
+    const isVisible = box.classList.toggle('visible');
+    
+    // Change the icon and text based on visibility
+    const icon = this.querySelector('.material-icons');
+    if (isVisible) {
+      icon.textContent = 'remove_circle_outline';
+      this.textContent = this.textContent.replace('Add', 'Hide');
+    } else {
+      icon.textContent = 'add_circle_outline';
+      this.textContent = this.textContent.replace('Hide', 'Add');
+    }
+    
+    // Re-add the icon since textContent replaced it
+    this.prepend(icon);
+  });
+}
+
+// Generate summary before submission
+function generateSummary() {
+  const summaryContent = document.getElementById('summaryContent');
+  
+  // Clear previous content
+  summaryContent.innerHTML = '';
+  
+  // Create summary items
+  addSummaryItem(summaryContent, 'Evaluator Name', document.getElementById('evaluatorName').value);
+  addSummaryItem(summaryContent, 'Presenter Name', document.getElementById('presenterName').value);
+  addSummaryItem(summaryContent, 'Initial Position', document.getElementById('initialPosition').value);
+  addSummaryItem(summaryContent, 'Body of Speech Score', document.getElementById('bodyScore').value + '/5');
+  
+  // Only add comments if they exist
+  const bodyComments = document.getElementById('bodyComments').value;
+  if (bodyComments) {
+    addSummaryItem(summaryContent, 'Body Comments', bodyComments);
+  }
+  
+  addSummaryItem(summaryContent, 'Diction Score', document.getElementById('dictionScore').value + '/5');
+  
+  // Parse rhetorical devices from JSON
+  try {
+    const devicesJson = document.getElementById('rhetoricalDevices').value;
+    const devices = devicesJson ? JSON.parse(devicesJson) : [];
+    addSummaryItem(summaryContent, 'Rhetorical Devices', devices.join(', ') || 'None selected');
+  } catch (e) {
+    addSummaryItem(summaryContent, 'Rhetorical Devices', 'None selected');
+  }
+  
+  const dictionComments = document.getElementById('dictionComments').value;
+  if (dictionComments) {
+    addSummaryItem(summaryContent, 'Diction Comments', dictionComments);
+  }
+  
+  addSummaryItem(summaryContent, 'Eye Contact Score', document.getElementById('eyeContactScore').value + '/5');
+  addSummaryItem(summaryContent, 'Posture Score', document.getElementById('postureScore').value + '/5');
+  
+  const deliveryComments = document.getElementById('deliveryComments').value;
+  if (deliveryComments) {
+    addSummaryItem(summaryContent, 'Delivery Comments', deliveryComments);
+  }
+  
+  addSummaryItem(summaryContent, 'Position Change', document.getElementById('positionChange').value);
+  addSummaryItem(summaryContent, 'Most Convincing Element', document.getElementById('mostConvincing').value);
+  addSummaryItem(summaryContent, 'Least Convincing Element', document.getElementById('leastConvincing').value);
+  addSummaryItem(summaryContent, 'Did Well', document.getElementById('didWell').value);
+  addSummaryItem(summaryContent, 'Improvement', document.getElementById('improvement').value);
+}
+
+// Add an item to the summary
+function addSummaryItem(container, label, value) {
+  const item = document.createElement('div');
+  item.className = 'summary-item';
+  
+  const labelElem = document.createElement('div');
+  labelElem.className = 'summary-label';
+  labelElem.textContent = label + ':';
+  
+  const valueElem = document.createElement('div');
+  valueElem.className = 'summary-value';
+  valueElem.textContent = value;
+  
+  item.appendChild(labelElem);
+  item.appendChild(valueElem);
+  container.appendChild(item);
+}
+
+// Handle form submission
+function handleFormSubmit(event) {
+  event.preventDefault();
+  
+  // Validate all sections
+  for (let i = 1; i <= 6; i++) {
+    if (!validateSection(i)) {
+      navigateToSection(i);
+      return;
+    }
+  }
+  
+  // Collect form data
+  const formData = {
+    evaluatorName: document.getElementById('evaluatorName').value,
+    presenterName: document.getElementById('presenterName').value,
+    initialPosition: document.getElementById('initialPosition').value,
+    bodyScore: document.getElementById('bodyScore').value,
+    bodyComments: document.getElementById('bodyComments').value || 'No comments provided',
+    dictionScore: document.getElementById('dictionScore').value,
+    rhetoricalDevices: JSON.parse(document.getElementById('rhetoricalDevices').value || '[]'),
+    dictionComments: document.getElementById('dictionComments').value || 'No comments provided',
+    eyeContactScore: document.getElementById('eyeContactScore').value,
+    postureScore: document.getElementById('postureScore').value,
+    deliveryComments: document.getElementById('deliveryComments').value || 'No comments provided',
+    positionChange: document.getElementById('positionChange').value,
+    mostConvincing: document.getElementById('mostConvincing').value,
+    leastConvincing: document.getElementById('leastConvincing').value,
+    didWell: document.getElementById('didWell').value,
+    improvement: document.getElementById('improvement').value
+  };
+  
+  // Disable submit button to prevent multiple submissions
+  document.getElementById('submitBtn').disabled = true;
+  
+  // Show loading indicator
+  const submitBtn = document.getElementById('submitBtn');
+  const originalText = submitBtn.textContent;
+  submitBtn.textContent = 'Submitting...';
+  
+  // Submit form data to server
+  google.script.run
+    .withSuccessHandler(function(response) {
+      showResultMessage(response.message, response.success);
+      
+      if (response.success) {
+        // Reset form
+        document.getElementById('evaluationForm').reset();
+        
+        // Navigate back to first section
+        navigateToSection(1);
+      }
+      
+      // Re-enable submit button
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
+    })
+    .withFailureHandler(function(error) {
+      showResultMessage('Error submitting form: ' + error, false);
+      
+      // Re-enable submit button
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
+    })
+    .processForm(formData);
+}
+
+// Show result message
+function showResultMessage(message, isSuccess) {
+  const resultMessage = document.getElementById('resultMessage');
+  resultMessage.textContent = message;
+  resultMessage.className = 'result-message ' + (isSuccess ? 'success' : 'error');
+  resultMessage.style.display = 'block';
+  
+  // Scroll to top
+  window.scrollTo(0, 0);
+  
+  // Hide message after 5 seconds
+  setTimeout(function() {
+    resultMessage.style.display = 'none';
+  }, 5000);
+}
+</script>
