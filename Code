@@ -50,64 +50,278 @@ function getStudentData() {
   return studentData;
 }
 
-// Process the form submission
+// Update Code.gs with improved email functionality
+
+// Process the form submission with improved error handling
 function processForm(formData) {
   try {
+    console.log("Process form started with data:", JSON.stringify(formData));
+    
+    // Validate required fields are present
+    if (!formData.evaluatorName || !formData.presenterName) {
+      return { success: false, message: "Missing required fields: evaluator or presenter name" };
+    }
+    
     // Save to the Peer Evaluations sheet
     saveToSheet(formData);
     
-    // Send emails
-    sendEmails(formData);
+    // Send emails (only if saving to sheet was successful)
+    try {
+      sendEmails(formData);
+    } catch (emailError) {
+      console.error("Email sending failed, but data was saved:", emailError.toString());
+      // Continue execution - we don't want email failure to affect form submission success
+    }
     
     return { success: true, message: "Your evaluation has been submitted successfully!" };
   } catch (error) {
+    console.error("Process form error:", error.toString());
     return { success: false, message: "Error: " + error.toString() };
   }
 }
 
-// Save form data to the Peer Evaluations sheet
-function saveToSheet(formData) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('Peer Evaluations');
-  
-  // Create a timestamp
-  const timestamp = new Date();
-  
-  // Find the presenter's email
+// Send emails to the teacher and presenter
+function sendEmails(formData) {
+  // Find presenter email
   const presenterEmail = findPresenterEmail(formData.presenterName);
   
-  // Process the rhetorical devices array
-  let rhetoricalDevices = '';
-  if (Array.isArray(formData.rhetoricalDevices)) {
-    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
-  } else {
-    rhetoricalDevices = 'None identified';
+  // Create email content
+  const subject = 'Speech Evaluation: ' + formData.presenterName + ' (evaluated by ' + formData.evaluatorName + ')';
+  const body = createEmailBody(formData);
+  
+  // Send email to teacher
+  if (teacherEmail) {
+    try {
+      MailApp.sendEmail({
+        to: teacherEmail,
+        subject: subject,
+        htmlBody: createHtmlEmailBody(formData)
+      });
+      console.log("Email sent to teacher: " + teacherEmail);
+    } catch (e) {
+      console.error("Error sending email to teacher: " + e.toString());
+    }
   }
   
-  // Create a row array with all the form data
-  const rowData = [
-    timestamp,                        // Timestamp
-    formData.evaluatorName,           // Evaluator Name
-    formData.presenterName,           // Presenter Name
-    presenterEmail,                   // Presenter Email
-    formData.initialPosition,         // Initial Position
-    formData.bodyScore,               // Body Score
-    formData.bodyComments,            // Body Comments
-    formData.dictionScore,            // Diction Score
-    rhetoricalDevices,                // Rhetorical Devices
-    formData.dictionComments,         // Diction Comments
-    formData.eyeContactScore,         // Eye Contact Score
-    formData.postureScore,            // Posture Score
-    formData.deliveryComments,        // Delivery Comments
-    formData.positionChange,          // Position Change
-    formData.mostConvincing,          // Most Convincing Element
-    formData.leastConvincing,         // Least Convincing Element
-    formData.didWell,                 // Did Well
-    formData.improvement              // Improvement
-  ];
+  // Send email to presenter
+  if (presenterEmail) {
+    try {
+      MailApp.sendEmail({
+        to: presenterEmail,
+        cc: teacherEmail, // CC the teacher on presenter emails
+        subject: subject,
+        htmlBody: createHtmlEmailBody(formData)
+      });
+      console.log("Email sent to presenter: " + presenterEmail);
+    } catch (e) {
+      console.error("Error sending email to presenter: " + e.toString());
+    }
+  }
+}
+
+// Create the HTML email body
+function createHtmlEmailBody(formData) {
+  // Process the rhetorical devices array
+  let rhetoricalDevices = 'None identified';
+  if (Array.isArray(formData.rhetoricalDevices) && formData.rhetoricalDevices.length > 0) {
+    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
+  } else if (typeof formData.rhetoricalDevices === 'string' && formData.rhetoricalDevices) {
+    try {
+      const parsed = JSON.parse(formData.rhetoricalDevices);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        rhetoricalDevices = parsed.join(', ');
+      }
+    } catch (e) {
+      rhetoricalDevices = formData.rhetoricalDevices;
+    }
+  }
+
+  // Create HTML email content  
+  let html = `
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+    <div style="background-color: #1a73e8; color: white; padding: 15px; border-radius: 5px 5px 0 0; margin: -20px -20px 20px;">
+      <h1 style="margin: 0; font-size: 22px;">Speech Evaluation Feedback</h1>
+    </div>
+    
+    <div style="color: #5f6368; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 10px;">
+      <p><strong>Speaker:</strong> ${formData.presenterName}</p>
+      <p><strong>Evaluated by:</strong> ${formData.evaluatorName}</p>
+      <p><strong>Initial Position:</strong> ${formData.initialPosition}</p>
+    </div>
+    
+    <div style="margin-bottom: 25px;">
+      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Speech Content</h2>
+      
+      <p><strong>Body of Speech Score:</strong> ${formData.bodyScore}/4</p>
+      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
+        <p><strong>Comments:</strong> ${formData.bodyComments}</p>
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 25px;">
+      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Diction & Rhetoric</h2>
+      
+      <p><strong>Diction Score:</strong> ${formData.dictionScore}/4</p>
+      <p><strong>Rhetorical Devices Used:</strong> ${rhetoricalDevices}</p>
+      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
+        <p><strong>Comments:</strong> ${formData.dictionComments}</p>
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 25px;">
+      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Delivery</h2>
+      
+      <p><strong>Eye Contact Score:</strong> ${formData.eyeContactScore}/4</p>
+      <p><strong>Posture & Gestures Score:</strong> ${formData.postureScore}/4</p>
+      <p><strong>Vocal Variety Score:</strong> ${formData.vocalScore}/4</p>
+      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
+        <p><strong>Comments:</strong> ${formData.deliveryComments}</p>
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 25px;">
+      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Impact & Feedback</h2>
+      
+      <p><strong>Position Change After Speech:</strong> ${formData.positionChange}</p>
+      <p><strong>Most Convincing Element:</strong> ${formData.mostConvincing}</p>
+      <p><strong>Least Convincing Element:</strong> ${formData.leastConvincing}</p>
+      <p><strong>What Was Done Well:</strong> ${formData.didWell}</p>
+      <p><strong>Area for Improvement:</strong> ${formData.improvement}</p>
+    </div>
+    
+    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #5f6368; text-align: center;">
+      <p>This is an automated message from the Speech Peer Evaluation System.</p>
+    </div>
+  </div>
+  `;
   
-  // Append the row to the sheet
-  sheet.appendRow(rowData);
+  return html;
+}
+
+// Create plain text email body (fallback)
+function createEmailBody(formData) {
+  let body = 'Speech Evaluation Summary\n\n';
+  
+  body += 'Evaluator: ' + formData.evaluatorName + '\n';
+  body += 'Presenter: ' + formData.presenterName + '\n\n';
+  
+  body += 'Initial Position: ' + formData.initialPosition + '\n\n';
+  
+  body += 'Body of Speech Score: ' + formData.bodyScore + '/4\n';
+  body += 'Comments: ' + formData.bodyComments + '\n\n';
+  
+  body += 'Diction and Rhetoric Score: ' + formData.dictionScore + '/4\n';
+  
+  // Process rhetorical devices
+  let rhetoricalDevices = 'None identified';
+  if (Array.isArray(formData.rhetoricalDevices) && formData.rhetoricalDevices.length > 0) {
+    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
+  } else if (typeof formData.rhetoricalDevices === 'string' && formData.rhetoricalDevices) {
+    try {
+      const parsed = JSON.parse(formData.rhetoricalDevices);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        rhetoricalDevices = parsed.join(', ');
+      }
+    } catch (e) {
+      rhetoricalDevices = formData.rhetoricalDevices;
+    }
+  }
+  
+  body += 'Rhetorical Devices Used: ' + rhetoricalDevices + '\n';
+  body += 'Comments: ' + formData.dictionComments + '\n\n';
+  
+  body += 'Eye Contact Score: ' + formData.eyeContactScore + '/4\n';
+  body += 'Posture and Gestures Score: ' + formData.postureScore + '/4\n';
+  body += 'Vocal Variety Score: ' + formData.vocalScore + '/4\n';
+  body += 'Delivery Comments: ' + formData.deliveryComments + '\n\n';
+  
+  body += 'Position Change After Speech: ' + formData.positionChange + '\n';
+  body += 'Most Convincing Element: ' + formData.mostConvincing + '\n';
+  body += 'Least Convincing Element: ' + formData.leastConvincing + '\n\n';
+  
+  body += 'What the Presenter Did Well: ' + formData.didWell + '\n';
+  body += 'Suggestion for Improvement: ' + formData.improvement + '\n';
+  
+  return body;
+}
+
+// Save form data to the Peer Evaluations sheet with robust error handling
+function saveToSheet(formData) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      throw new Error("Could not access the active spreadsheet");
+    }
+    
+    const sheet = ss.getSheetByName('Peer Evaluations');
+    if (!sheet) {
+      throw new Error("Could not find sheet named 'Peer Evaluations'");
+    }
+    
+    // Create a timestamp
+    const timestamp = new Date();
+    
+    // Find the presenter's email
+    const presenterEmail = findPresenterEmail(formData.presenterName);
+    
+    // Process the rhetorical devices array
+    let rhetoricalDevices = '';
+    if (Array.isArray(formData.rhetoricalDevices)) {
+      rhetoricalDevices = formData.rhetoricalDevices.join(', ');
+    } else if (typeof formData.rhetoricalDevices === 'string') {
+      try {
+        const parsed = JSON.parse(formData.rhetoricalDevices);
+        if (Array.isArray(parsed)) {
+          rhetoricalDevices = parsed.join(', ');
+        } else {
+          rhetoricalDevices = formData.rhetoricalDevices || 'None identified';
+        }
+      } catch (e) {
+        rhetoricalDevices = formData.rhetoricalDevices || 'None identified';
+      }
+    } else {
+      rhetoricalDevices = 'None identified';
+    }
+    
+    // Handle undefined or null values safely
+    const safeGet = (value, defaultValue = '') => {
+      return value !== undefined && value !== null ? value : defaultValue;
+    };
+    
+    // Create a row array with all the form data
+    const rowData = [
+      timestamp,                           // Timestamp
+      safeGet(formData.evaluatorName),     // Evaluator Name
+      safeGet(formData.presenterName),     // Presenter Name
+      presenterEmail,                      // Presenter Email
+      safeGet(formData.initialPosition),   // Initial Position
+      safeGet(formData.bodyScore),         // Body Score
+      safeGet(formData.bodyComments, 'No comments provided'),  // Body Comments
+      safeGet(formData.dictionScore),      // Diction Score
+      rhetoricalDevices,                   // Rhetorical Devices
+      safeGet(formData.dictionComments, 'No comments provided'),  // Diction Comments
+      safeGet(formData.eyeContactScore),   // Eye Contact Score
+      safeGet(formData.postureScore),      // Posture Score
+      safeGet(formData.vocalScore),        // Vocal Score
+      safeGet(formData.deliveryComments, 'No comments provided'),  // Delivery Comments
+      safeGet(formData.positionChange),    // Position Change
+      safeGet(formData.mostConvincing),    // Most Convincing Element
+      safeGet(formData.leastConvincing),   // Least Convincing Element
+      safeGet(formData.didWell),           // Did Well
+      safeGet(formData.improvement)        // Improvement
+    ];
+    
+    console.log("Attempting to append row with data:", JSON.stringify(rowData));
+    
+    // Append the row to the sheet
+    sheet.appendRow(rowData);
+    console.log("Row successfully appended to sheet");
+    
+    return true;
+  } catch (error) {
+    console.error("Save to sheet error:", error.toString());
+    throw error; // Re-throw to be caught by processForm
+  }
 }
 
 // Add this function to your Code.gs file
@@ -125,61 +339,337 @@ function findPresenterEmail(fullName) {
   return '';
 }
 
-// Send emails to the teacher and presenter
-function sendEmails(formData) {
-  // Find presenter email
-  const presenterEmail = findPresenterEmail(formData.presenterName);
+// NEW FUNCTIONS
+
+// Get all evaluations for a specific presenter
+function getPresenterEvaluations(presenterName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Peer Evaluations');
   
-  // Create email content
-  const subject = 'Speech Evaluation: ' + formData.presenterName + ' (evaluated by ' + formData.evaluatorName + ')';
-  const body = createEmailBody(formData);
+  // Get all data from the sheet
+  const data = sheet.getDataRange().getValues();
   
-  // Send email to teacher
-  if (teacherEmail) {
-    MailApp.sendEmail(teacherEmail, subject, body);
+  // Skip the header row if it exists
+  const headerRow = 0;
+  
+  // Filter by presenter name
+  const evaluations = [];
+  for (let i = headerRow + 1; i < data.length; i++) {
+    // Presenter name is in column C (index 2)
+    if (data[i][2] === presenterName) {
+      evaluations.push({
+        timestamp: data[i][0],
+        evaluatorName: data[i][1],
+        presenterName: data[i][2],
+        presenterEmail: data[i][3],
+        initialPosition: data[i][4],
+        bodyScore: parseFloat(data[i][5]),
+        bodyComments: data[i][6],
+        dictionScore: parseFloat(data[i][7]),
+        rhetoricalDevices: data[i][8],
+        dictionComments: data[i][9],
+        eyeContactScore: parseFloat(data[i][10]),
+        postureScore: parseFloat(data[i][11]),
+        deliveryComments: data[i][12],
+        positionChange: data[i][13],
+        mostConvincing: data[i][14],
+        leastConvincing: data[i][15],
+        didWell: data[i][16],
+        improvement: data[i][17]
+      });
+    }
   }
   
-  // Send email to presenter
+  return evaluations;
+}
+
+// Calculate average scores from evaluations
+function calculateAverages(evaluations) {
+  if (evaluations.length === 0) return null;
+  
+  // Sum all scores
+  let bodySum = 0;
+  let dictionSum = 0;
+  let eyeContactSum = 0;
+  let postureSum = 0;
+  
+  evaluations.forEach(eval => {
+    bodySum += eval.bodyScore;
+    dictionSum += eval.dictionScore;
+    eyeContactSum += eval.eyeContactScore;
+    postureSum += eval.postureScore;
+  });
+  
+  // Calculate averages
+  const count = evaluations.length;
+  
+  return {
+    bodyAverage: (bodySum / count).toFixed(1),
+    dictionAverage: (dictionSum / count).toFixed(1),
+    eyeContactAverage: (eyeContactSum / count).toFixed(1),
+    postureAverage: (postureSum / count).toFixed(1),
+    count: count
+  };
+}
+
+// Group comments by type
+function groupComments(evaluations) {
+  const bodyComments = [];
+  const dictionComments = [];
+  const deliveryComments = [];
+  const positionChanges = [];
+  const mostConvincing = [];
+  const leastConvincing = [];
+  const didWell = [];
+  const improvement = [];
+  const rhetoricalDevices = new Set();
+  
+  evaluations.forEach(eval => {
+    // Add comments if they're not empty and not "No comments provided"
+    if (eval.bodyComments && eval.bodyComments !== 'No comments provided') {
+      bodyComments.push(sanitizeComment(eval.bodyComments));
+    }
+    
+    if (eval.dictionComments && eval.dictionComments !== 'No comments provided') {
+      dictionComments.push(sanitizeComment(eval.dictionComments));
+    }
+    
+    if (eval.deliveryComments && eval.deliveryComments !== 'No comments provided') {
+      deliveryComments.push(sanitizeComment(eval.deliveryComments));
+    }
+    
+    // Add other feedback
+    positionChanges.push(eval.positionChange);
+    mostConvincing.push(eval.mostConvincing);
+    leastConvincing.push(eval.leastConvincing);
+    didWell.push(eval.didWell);
+    improvement.push(eval.improvement);
+    
+    // Add rhetorical devices
+    if (eval.rhetoricalDevices) {
+      eval.rhetoricalDevices.split(', ').forEach(device => {
+        if (device !== 'None identified') {
+          rhetoricalDevices.add(device);
+        }
+      });
+    }
+  });
+  
+  return {
+    bodyComments,
+    dictionComments,
+    deliveryComments,
+    positionChanges,
+    mostConvincing,
+    leastConvincing,
+    didWell,
+    improvement,
+    rhetoricalDevices: Array.from(rhetoricalDevices)
+  };
+}
+
+// Sanitize comments to filter inappropriate language
+function sanitizeComment(comment) {
+  let sanitized = comment;
+  
+  // Check for inappropriate words
+  INAPPROPRIATE_WORDS.forEach(word => {
+    // Create a regular expression to match the word with word boundaries
+    const regex = new RegExp('\\b' + word + '\\b', 'gi');
+    
+    // Replace with asterisks
+    sanitized = sanitized.replace(regex, '*'.repeat(word.length));
+  });
+  
+  return sanitized;
+}
+
+// Generate HTML for star ratings
+function generateStars(rating) {
+  const fullStars = Math.floor(rating);
+  const halfStar = rating % 1 >= 0.5;
+  const emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
+  
+  let starsHtml = '';
+  
+  // Add full stars
+  for (let i = 0; i < fullStars; i++) {
+    starsHtml += '★';
+  }
+  
+  // Add half star if needed
+  if (halfStar) {
+    starsHtml += '★';
+  }
+  
+  // Add empty stars
+  for (let i = 0; i < emptyStars; i++) {
+    starsHtml += '☆';
+  }
+  
+  return starsHtml;
+}
+
+// Generate HTML for comments list
+function generateCommentsList(comments) {
+  if (!comments || comments.length === 0) {
+    return '<div class="comment">No comments provided</div>';
+  }
+  
+  let html = '';
+  comments.forEach(comment => {
+    html += '<div class="comment">' + comment + '</div>';
+  });
+  
+  return html;
+}
+
+// Generate HTML for feedback list
+function generateFeedbackList(items) {
+  if (!items || items.length === 0) {
+    return '<div class="comment">No feedback provided</div>';
+  }
+  
+  // Count occurrences of each unique item
+  const counts = {};
+  items.forEach(item => {
+    counts[item] = (counts[item] || 0) + 1;
+  });
+  
+  // Sort by count (descending)
+  const sortedItems = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  
+  let html = '';
+  sortedItems.forEach(item => {
+    const count = counts[item];
+    const percentage = Math.round((count / items.length) * 100);
+    html += `<div class="comment">${item} (${percentage}% of evaluators)</div>`;
+  });
+  
+  return html;
+}
+
+// Send summary email to presenter
+function sendSummaryEmail(presenterName) {
+  // Get all evaluations for this presenter
+  const evaluations = getPresenterEvaluations(presenterName);
+  
+  if (evaluations.length === 0) return; // No evaluations to summarize
+  
+  // Get presenter's email
+  const presenterEmail = evaluations[0].presenterEmail;
+  
+  // Calculate averages
+  const averages = calculateAverages(evaluations);
+  
+  // Group comments
+  const commentGroups = groupComments(evaluations);
+  
+  // Get initial position (use the most common one)
+  const positionCounts = {};
+  evaluations.forEach(eval => {
+    positionCounts[eval.initialPosition] = (positionCounts[eval.initialPosition] || 0) + 1;
+  });
+  
+  const initialPosition = Object.keys(positionCounts).reduce((a, b) => 
+    positionCounts[a] > positionCounts[b] ? a : b
+  );
+  
+  // Prepare email template data
+  const templateData = {
+    presenterName: presenterName,
+    evaluationCount: averages.count,
+    bodyAverage: averages.bodyAverage,
+    bodyStars: generateStars(parseFloat(averages.bodyAverage)),
+    dictionAverage: averages.dictionAverage,
+    dictionStars: generateStars(parseFloat(averages.dictionAverage)),
+    eyeContactAverage: averages.eyeContactAverage,
+    eyeContactStars: generateStars(parseFloat(averages.eyeContactAverage)),
+    postureAverage: averages.postureAverage,
+    postureStars: generateStars(parseFloat(averages.postureAverage)),
+    initialPosition: initialPosition,
+    bodyCommentsList: generateCommentsList(commentGroups.bodyComments),
+    rhetoricalDevicesList: generateCommentsList(commentGroups.rhetoricalDevices),
+    dictionCommentsList: generateCommentsList(commentGroups.dictionComments),
+    deliveryCommentsList: generateCommentsList(commentGroups.deliveryComments),
+    positionChangeList: generateFeedbackList(commentGroups.positionChanges),
+    mostConvincingList: generateFeedbackList(commentGroups.mostConvincing),
+    leastConvincingList: generateFeedbackList(commentGroups.leastConvincing),
+    didWellList: generateFeedbackList(commentGroups.didWell),
+    improvementList: generateFeedbackList(commentGroups.improvement)
+  };
+  
+  // Create email HTML
+  const emailTemplate = HtmlService.createTemplateFromFile('EmailTemplate');
+  
+  // Set template values
+  for (const key in templateData) {
+    emailTemplate[key] = templateData[key];
+  }
+  
+  const emailHtml = emailTemplate.evaluate().getContent();
+  
+  // Send email
+  const subject = 'Speech Evaluation Summary - ' + presenterName;
+  
+  // Send to presenter and CC teacher
   if (presenterEmail) {
-    MailApp.sendEmail(presenterEmail, subject, body);
+    MailApp.sendEmail({
+      to: presenterEmail,
+      cc: teacherEmail,
+      subject: subject,
+      htmlBody: emailHtml
+    });
+  } else if (teacherEmail) {
+    // If presenter email is not available, send only to teacher
+    MailApp.sendEmail({
+      to: teacherEmail,
+      subject: subject + ' (Presenter email not found)',
+      htmlBody: emailHtml
+    });
   }
 }
 
-// Create the email body
-function createEmailBody(formData) {
-  let body = 'Speech Evaluation Summary\n\n';
-  
-  body += 'Evaluator: ' + formData.evaluatorName + '\n';
-  body += 'Presenter: ' + formData.presenterName + '\n\n';
-  
-  body += 'Initial Position: ' + formData.initialPosition + '\n\n';
-  
-  body += 'Body of Speech Score: ' + formData.bodyScore + '/5\n';
-  body += 'Comments: ' + formData.bodyComments + '\n\n';
-  
-  body += 'Diction and Rhetoric Score: ' + formData.dictionScore + '/5\n';
-  
-  // Process rhetorical devices
-  let rhetoricalDevices = '';
-  if (Array.isArray(formData.rhetoricalDevices)) {
-    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
-  } else {
-    rhetoricalDevices = 'None identified';
+/*
+// Diagnostic function to test if we can access the spreadsheet and sheet
+function debugSheetAccess() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      return { success: false, message: "Could not access the active spreadsheet" };
+    }
+    
+    const sheetNames = ss.getSheets().map(sheet => sheet.getName());
+    
+    const peerEvalSheet = ss.getSheetByName('Peer Evaluations');
+    if (!peerEvalSheet) {
+      return { 
+        success: false, 
+        message: "Could not find 'Peer Evaluations' sheet",
+        availableSheets: sheetNames
+      };
+    }
+    
+    // Try to write a test row
+    try {
+      const testRow = ["TEST", "Diagnostic Test", new Date(), "Please delete this row"];
+      peerEvalSheet.appendRow(testRow);
+      return { 
+        success: true, 
+        message: "Successfully accessed spreadsheet and appended test row",
+        sheetId: ss.getId(),
+        sheetUrl: ss.getUrl(),
+        sheetNames: sheetNames
+      };
+    } catch (writeError) {
+      return {
+        success: false,
+        message: "Could access spreadsheet but failed to write: " + writeError.toString(),
+        sheetNames: sheetNames
+      };
+    }
+  } catch (error) {
+    return { success: false, message: "Error: " + error.toString() };
   }
-  
-  body += 'Rhetorical Devices Used: ' + rhetoricalDevices + '\n';
-  body += 'Comments: ' + formData.dictionComments + '\n\n';
-  
-  body += 'Eye Contact Score: ' + formData.eyeContactScore + '/5\n';
-  body += 'Posture and Gestures Score: ' + formData.postureScore + '/5\n';
-  body += 'Delivery Comments: ' + formData.deliveryComments + '\n\n';
-  
-  body += 'Position Change After Speech: ' + formData.positionChange + '\n';
-  body += 'Most Convincing Element: ' + formData.mostConvincing + '\n';
-  body += 'Least Convincing Element: ' + formData.leastConvincing + '\n\n';
-  
-  body += 'What the Presenter Did Well: ' + formData.didWell + '\n';
-  body += 'Suggestion for Improvement: ' + formData.improvement + '\n';
-  
-  return body;
 }
+*/
