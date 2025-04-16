@@ -1,0 +1,185 @@
+// Google Apps Script to create a web app for peer speech evaluations
+// This reads from "Index" tab and writes to "Peer Evaluations" tab
+
+// Global variables
+let studentData = [];
+let teacherEmail = '';
+
+// Main function to serve the web app HTML
+function doGet() {
+  // Get student data from the spreadsheet
+  loadStudentData();
+  
+  // Create and return the HTML content
+  return HtmlService.createTemplateFromFile('Index')
+      .evaluate()
+      .setTitle('Speech Peer Evaluation')
+      .setFaviconUrl('https://www.gstatic.com/images/branding/product/1x/forms_48dp.png')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// Load student data from the Index tab
+function loadStudentData() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const indexSheet = ss.getSheetByName('Index');
+  
+  // Get all data from the Index sheet
+  const data = indexSheet.getDataRange().getValues();
+  
+  // Skip the header row (row 1)
+  studentData = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0]) { // Only add if there's a first name
+      studentData.push({
+        firstName: data[i][0],
+        lastName: data[i][1],
+        email: data[i][2],
+        fullName: data[i][0] + ' ' + data[i][1]
+      });
+    }
+  }
+  
+  // Get teacher email from cell D2
+  teacherEmail = data[1][3];
+}
+
+// Return student data to the client-side JavaScript
+function getStudentData() {
+  loadStudentData(); // Refresh data
+  return studentData;
+}
+
+// Process the form submission
+function processForm(formData) {
+  try {
+    // Save to the Peer Evaluations sheet
+    saveToSheet(formData);
+    
+    // Send emails
+    sendEmails(formData);
+    
+    return { success: true, message: "Your evaluation has been submitted successfully!" };
+  } catch (error) {
+    return { success: false, message: "Error: " + error.toString() };
+  }
+}
+
+// Save form data to the Peer Evaluations sheet
+function saveToSheet(formData) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Peer Evaluations');
+  
+  // Create a timestamp
+  const timestamp = new Date();
+  
+  // Find the presenter's email
+  const presenterEmail = findPresenterEmail(formData.presenterName);
+  
+  // Process the rhetorical devices array
+  let rhetoricalDevices = '';
+  if (Array.isArray(formData.rhetoricalDevices)) {
+    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
+  } else {
+    rhetoricalDevices = 'None identified';
+  }
+  
+  // Create a row array with all the form data
+  const rowData = [
+    timestamp,                        // Timestamp
+    formData.evaluatorName,           // Evaluator Name
+    formData.presenterName,           // Presenter Name
+    presenterEmail,                   // Presenter Email
+    formData.initialPosition,         // Initial Position
+    formData.bodyScore,               // Body Score
+    formData.bodyComments,            // Body Comments
+    formData.dictionScore,            // Diction Score
+    rhetoricalDevices,                // Rhetorical Devices
+    formData.dictionComments,         // Diction Comments
+    formData.eyeContactScore,         // Eye Contact Score
+    formData.postureScore,            // Posture Score
+    formData.deliveryComments,        // Delivery Comments
+    formData.positionChange,          // Position Change
+    formData.mostConvincing,          // Most Convincing Element
+    formData.leastConvincing,         // Least Convincing Element
+    formData.didWell,                 // Did Well
+    formData.improvement              // Improvement
+  ];
+  
+  // Append the row to the sheet
+  sheet.appendRow(rowData);
+}
+
+// Add this function to your Code.gs file
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+// Find a presenter's email from their full name
+function findPresenterEmail(fullName) {
+  for (let i = 0; i < studentData.length; i++) {
+    if (studentData[i].fullName === fullName) {
+      return studentData[i].email;
+    }
+  }
+  return '';
+}
+
+// Send emails to the teacher and presenter
+function sendEmails(formData) {
+  // Find presenter email
+  const presenterEmail = findPresenterEmail(formData.presenterName);
+  
+  // Create email content
+  const subject = 'Speech Evaluation: ' + formData.presenterName + ' (evaluated by ' + formData.evaluatorName + ')';
+  const body = createEmailBody(formData);
+  
+  // Send email to teacher
+  if (teacherEmail) {
+    MailApp.sendEmail(teacherEmail, subject, body);
+  }
+  
+  // Send email to presenter
+  if (presenterEmail) {
+    MailApp.sendEmail(presenterEmail, subject, body);
+  }
+}
+
+// Create the email body
+function createEmailBody(formData) {
+  let body = 'Speech Evaluation Summary\n\n';
+  
+  body += 'Evaluator: ' + formData.evaluatorName + '\n';
+  body += 'Presenter: ' + formData.presenterName + '\n\n';
+  
+  body += 'Initial Position: ' + formData.initialPosition + '\n\n';
+  
+  body += 'Body of Speech Score: ' + formData.bodyScore + '/5\n';
+  body += 'Comments: ' + formData.bodyComments + '\n\n';
+  
+  body += 'Diction and Rhetoric Score: ' + formData.dictionScore + '/5\n';
+  
+  // Process rhetorical devices
+  let rhetoricalDevices = '';
+  if (Array.isArray(formData.rhetoricalDevices)) {
+    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
+  } else {
+    rhetoricalDevices = 'None identified';
+  }
+  
+  body += 'Rhetorical Devices Used: ' + rhetoricalDevices + '\n';
+  body += 'Comments: ' + formData.dictionComments + '\n\n';
+  
+  body += 'Eye Contact Score: ' + formData.eyeContactScore + '/5\n';
+  body += 'Posture and Gestures Score: ' + formData.postureScore + '/5\n';
+  body += 'Delivery Comments: ' + formData.deliveryComments + '\n\n';
+  
+  body += 'Position Change After Speech: ' + formData.positionChange + '\n';
+  body += 'Most Convincing Element: ' + formData.mostConvincing + '\n';
+  body += 'Least Convincing Element: ' + formData.leastConvincing + '\n\n';
+  
+  body += 'What the Presenter Did Well: ' + formData.didWell + '\n';
+  body += 'Suggestion for Improvement: ' + formData.improvement + '\n';
+  
+  return body;
+}
