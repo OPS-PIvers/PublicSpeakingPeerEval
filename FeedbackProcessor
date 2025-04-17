@@ -1,0 +1,633 @@
+// Add this at the top of your FeedbackProcessor.gs file
+// Default teacher email as a fallback
+const DEFAULT_TEACHER_EMAIL = "notifications@orono.k12.mn.us";
+
+// Send feedback email to a specific presenter
+function sendFeedbackEmail(presenterName) {
+  try {
+    // Get all evaluations for this presenter
+    const evaluations = getPresenterEvaluations(presenterName);
+    
+    if (evaluations.length === 0) {
+      return { success: false, message: `No evaluation data found for ${presenterName}.` };
+    }
+    
+    // Find presenter's email using our improved finder function
+    const presenterEmail = findPresenterEmail(presenterName);
+    
+    if (!presenterEmail) {
+      return { success: false, message: `No email address found for ${presenterName}.` };
+    }
+    
+    // Get teacher email
+    const teacherCcEmail = getTeacherEmail();
+    
+    // Generate the feedback email HTML
+    const emailHtml = generateFeedbackEmailHtml(presenterName, evaluations);
+    
+    // Log email details for debugging
+    console.log(`Sending feedback to: ${presenterName} <${presenterEmail}>, CC: ${teacherCcEmail}`);
+    
+    // Send the email
+    MailApp.sendEmail({
+      to: presenterEmail,
+      cc: teacherCcEmail,
+      subject: `Speech Evaluation Summary - ${presenterName}`,
+      htmlBody: emailHtml
+    });
+    
+    return { 
+      success: true, 
+      message: `Feedback email sent to ${presenterName} at ${presenterEmail} with CC to teacher (${teacherCcEmail}).` 
+    };
+  } catch (error) {
+    console.error(`Error sending feedback to ${presenterName}:`, error);
+    return { success: false, message: error.toString() };
+  }
+}
+
+// Show the feedback preview for a selected presenter
+function showFeedbackPreview(presenterName) {
+  // Get all evaluations for this presenter
+  const evaluations = getPresenterEvaluations(presenterName);
+  
+  if (evaluations.length === 0) {
+    SpreadsheetApp.getUi().alert(
+      'No Data Found',
+      `No evaluation data was found for ${presenterName}.`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  
+  // Generate the feedback email HTML
+  const emailHtml = generateFeedbackEmailHtml(presenterName, evaluations);
+  
+  // Create the preview dialog
+  const html = HtmlService.createHtmlOutput(
+    `<!DOCTYPE html>
+    <html>
+      <head>
+        <base target="_top">
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+          }
+          .preview-container {
+            border: 1px solid #ddd;
+            padding: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+          }
+          .button-container {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+          }
+          button {
+            padding: 8px 16px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+          }
+          button:hover {
+            background-color: #3367d6;
+          }
+          .cancel-button {
+            background-color: #f1f1f1;
+            color: #333;
+          }
+          .cancel-button:hover {
+            background-color: #e4e4e4;
+          }
+        </style>
+      </head>
+      <body>
+        <h2>Email Preview for ${presenterName}</h2>
+        <div class="preview-container">
+          ${emailHtml}
+        </div>
+        <div class="button-container">
+          <button class="cancel-button" onclick="google.script.host.close()">Cancel</button>
+          <button onclick="sendEmail()">Send Email</button>
+        </div>
+        
+        <script>
+          function sendEmail() {
+            if (confirm("Are you sure you want to send this feedback email?")) {
+              google.script.run
+                .withSuccessHandler(function(result) {
+                  if (result.success) {
+                    alert("Feedback email sent successfully!");
+                  } else {
+                    alert("Error: " + result.message);
+                  }
+                  google.script.host.close();
+                })
+                .withFailureHandler(function(error) {
+                  alert("Error: " + error.message);
+                  google.script.host.close();
+                })
+                .sendFeedbackEmail("${presenterName}");
+            }
+          }
+        </script>
+      </body>
+    </html>`
+  )
+  .setWidth(800)
+  .setHeight(600);
+  
+  SpreadsheetApp.getUi().showModalDialog(html, 'Feedback Email Preview');
+}
+
+// Generate the HTML content for the feedback email
+function generateFeedbackEmailHtml(presenterName, evaluations) {
+  // Get statistical summaries
+  const stats = calculateStatistics(evaluations);
+  const feedbackByCategory = organizeFeedbackByCategory(evaluations);
+  
+  // Create the HTML email
+  const html = `
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          max-width: 800px;
+          margin: 0 auto;
+        }
+        .header {
+          background-color: #1a73e8;
+          color: white;
+          padding: 20px;
+          text-align: center;
+          border-radius: 5px 5px 0 0;
+        }
+        .content {
+          padding: 20px;
+          border: 1px solid #ddd;
+          border-top: none;
+          border-radius: 0 0 5px 5px;
+        }
+        .summary-card {
+          background-color: #f9f9f9;
+          border: 1px solid #ddd;
+          border-radius: 5px;
+          padding: 15px;
+          margin-bottom: 20px;
+        }
+        .summary-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 10px;
+          margin-bottom: 15px;
+        }
+        .summary-item {
+          text-align: center;
+        }
+        .summary-value {
+          font-size: 24px;
+          font-weight: bold;
+          color: #1a73e8;
+        }
+        .summary-label {
+          font-size: 14px;
+          color: #666;
+        }
+        .star-rating {
+          color: #fbbc04;
+          letter-spacing: 2px;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 20px;
+        }
+        th {
+          background-color: #1a73e8;
+          color: white;
+          text-align: left;
+          padding: 10px;
+        }
+        td {
+          padding: 10px;
+          border-bottom: 1px solid #ddd;
+        }
+        tr:nth-child(even) {
+          background-color: #f9f9f9;
+        }
+        .section-title {
+          font-size: 18px;
+          font-weight: bold;
+          margin: 20px 0 10px;
+          padding-bottom: 5px;
+          border-bottom: 2px solid #1a73e8;
+          color: #1a73e8;
+        }
+        .comment {
+          font-style: italic;
+          padding: 10px;
+          background-color: #f1f8ff;
+          border-left: 4px solid #1a73e8;
+          margin: 5px 0;
+        }
+        .footer {
+          margin-top: 30px;
+          text-align: center;
+          font-size: 12px;
+          color: #666;
+        }
+        .convincing-item {
+          display: flex;
+          align-items: center;
+          margin-bottom: 10px;
+        }
+        .convince-bar {
+          flex-grow: 1;
+          height: 20px;
+          background-color: #e0e0e0;
+          border-radius: 10px;
+          margin: 0 10px;
+          position: relative;
+        }
+        .convince-bar-fill {
+          height: 100%;
+          border-radius: 10px;
+          background-color: #1a73e8;
+        }
+        .convince-percentage {
+          font-weight: bold;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>Speech Evaluation Feedback</h1>
+        <h2>${presenterName}</h2>
+        <p>Based on feedback from ${evaluations.length} peer evaluators</p>
+      </div>
+      
+      <div class="content">
+        <div class="summary-card">
+          <h3>Performance Summary</h3>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <div class="summary-value">${stats.bodyAverage}</div>
+              <div class="star-rating">${generateStarRating(stats.bodyAverage)}</div>
+              <div class="summary-label">Body of Speech</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${stats.dictionAverage}</div>
+              <div class="star-rating">${generateStarRating(stats.dictionAverage)}</div>
+              <div class="summary-label">Diction & Rhetoric</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${stats.eyeContactAverage}</div>
+              <div class="star-rating">${generateStarRating(stats.eyeContactAverage)}</div>
+              <div class="summary-label">Eye Contact</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${stats.postureAverage}</div>
+              <div class="star-rating">${generateStarRating(stats.postureAverage)}</div>
+              <div class="summary-label">Posture & Gestures</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-value">${stats.vocalAverage}</div>
+              <div class="star-rating">${generateStarRating(stats.vocalAverage)}</div>
+              <div class="summary-label">Vocal Variety</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="section-title">Audience Impact</div>
+        <div class="summary-card">
+          <h3>Position Change After Speech</h3>
+          ${generatePositionChangeHtml(stats.positionChanges)}
+          
+          <h3>Persuasive Elements</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div>
+              <h4>Most Convincing Elements</h4>
+              ${generateConvincingElementsHtml(stats.mostConvincing)}
+            </div>
+            <div>
+              <h4>Least Convincing Elements</h4>
+              ${generateConvincingElementsHtml(stats.leastConvincing)}
+            </div>
+          </div>
+        </div>
+        
+        <div class="section-title">Rhetorical Devices Used</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;">
+          ${stats.rhetoricalDevices.map(device => 
+            `<div style="background-color: #e8f0fe; color: #1a73e8; padding: 5px 10px; border-radius: 20px; font-size: 14px;">${device}</div>`
+          ).join('')}
+        </div>
+        
+        <div class="section-title">Speech Content Feedback</div>
+        <table>
+          <tr>
+            <th>Strengths</th>
+            <th>Areas for Improvement</th>
+          </tr>
+          <tr>
+            <td>
+              ${feedbackByCategory.didWell.map(item => 
+                `<div class="comment">${item}</div>`
+              ).join('')}
+            </td>
+            <td>
+              ${feedbackByCategory.improvement.map(item => 
+                `<div class="comment">${item}</div>`
+              ).join('')}
+            </td>
+          </tr>
+        </table>
+        
+        <div class="section-title">Body & Organization Feedback</div>
+        <table>
+          <tr>
+            <th>Peer Comments</th>
+          </tr>
+          ${feedbackByCategory.bodyComments.map(comment => 
+            `<tr><td><div class="comment">${comment}</div></td></tr>`
+          ).join('')}
+        </table>
+        
+        <div class="section-title">Diction & Rhetoric Feedback</div>
+        <table>
+          <tr>
+            <th>Peer Comments</th>
+          </tr>
+          ${feedbackByCategory.dictionComments.map(comment => 
+            `<tr><td><div class="comment">${comment}</div></td></tr>`
+          ).join('')}
+        </table>
+        
+        <div class="section-title">Delivery Feedback</div>
+        <table>
+          <tr>
+            <th>Peer Comments</th>
+          </tr>
+          ${feedbackByCategory.deliveryComments.map(comment => 
+            `<tr><td><div class="comment">${comment}</div></td></tr>`
+          ).join('')}
+        </table>
+        
+        <div class="footer">
+          <p>This is an automated summary generated by the Speech Peer Evaluation System.</p>
+          <p>Generated on ${new Date().toLocaleDateString()}</p>
+        </div>
+      </div>
+    </body>
+  </html>
+  `;
+  
+  return html;
+}
+
+// Calculate statistics from evaluations
+function calculateStatistics(evaluations) {
+  // Initialize sums
+  let bodySum = 0;
+  let dictionSum = 0;
+  let eyeContactSum = 0;
+  let postureSum = 0;
+  let vocalSum = 0;
+  
+  // Arrays for collecting data
+  const positionChanges = [];
+  const mostConvincing = [];
+  const leastConvincing = [];
+  const rhetoricalDevicesSet = new Set();
+  
+  // Process each evaluation
+  evaluations.forEach(eval => {
+    // Add scores to sums
+    bodySum += parseFloat(eval.bodyScore) || 0;
+    dictionSum += parseFloat(eval.dictionScore) || 0;
+    eyeContactSum += parseFloat(eval.eyeContactScore) || 0;
+    postureSum += parseFloat(eval.postureScore) || 0;
+    vocalSum += parseFloat(eval.vocalScore) || 0;
+    
+    // Add feedback items to arrays
+    if (eval.positionChange) positionChanges.push(eval.positionChange);
+    if (eval.mostConvincing) mostConvincing.push(eval.mostConvincing);
+    if (eval.leastConvincing) leastConvincing.push(eval.leastConvincing);
+    
+    // Add rhetorical devices
+    if (eval.rhetoricalDevices) {
+      const devices = typeof eval.rhetoricalDevices === 'string' ? 
+        eval.rhetoricalDevices.split(', ') : 
+        eval.rhetoricalDevices;
+        
+      devices.forEach(device => {
+        if (device && device !== 'None identified') {
+          rhetoricalDevicesSet.add(device);
+        }
+      });
+    }
+  });
+  
+  // Calculate averages
+  const count = evaluations.length;
+  
+  return {
+    bodyAverage: (bodySum / count).toFixed(1),
+    dictionAverage: (dictionSum / count).toFixed(1),
+    eyeContactAverage: (eyeContactSum / count).toFixed(1),
+    postureAverage: (postureSum / count).toFixed(1),
+    vocalAverage: (vocalSum / count).toFixed(1),
+    positionChanges,
+    mostConvincing,
+    leastConvincing,
+    rhetoricalDevices: Array.from(rhetoricalDevicesSet),
+    count
+  };
+}
+
+// Organize feedback by category and filter out empty or "No comments provided"
+function organizeFeedbackByCategory(evaluations) {
+  const bodyComments = [];
+  const dictionComments = [];
+  const deliveryComments = [];
+  const didWell = [];
+  const improvement = [];
+  
+  evaluations.forEach(eval => {
+    try {
+      // Add comments if not empty or "No comments provided"
+      if (eval.bodyComments && eval.bodyComments !== 'No comments provided') {
+        bodyComments.push(sanitizeComment(eval.bodyComments));
+      }
+      
+      if (eval.dictionComments && eval.dictionComments !== 'No comments provided') {
+        dictionComments.push(sanitizeComment(eval.dictionComments));
+      }
+      
+      if (eval.deliveryComments && eval.deliveryComments !== 'No comments provided') {
+        deliveryComments.push(sanitizeComment(eval.deliveryComments));
+      }
+      
+      // Add "did well" and "improvement" items
+      if (eval.didWell) {
+        didWell.push(eval.didWell);
+      }
+      
+      if (eval.improvement) {
+        improvement.push(eval.improvement);
+      }
+    } catch (error) {
+      console.error("Error processing evaluation:", error);
+      // Continue processing other evaluations
+    }
+  });
+  
+  return {
+    bodyComments,
+    dictionComments,
+    deliveryComments,
+    didWell,
+    improvement
+  };
+}
+
+// Generate star rating HTML
+function generateStarRating(score) {
+  const fullStars = Math.floor(score);
+  const halfStar = score % 1 >= 0.5;
+  const emptyStars = 4 - fullStars - (halfStar ? 1 : 0);
+  
+  let starsHtml = '';
+  
+  // Add full stars
+  for (let i = 0; i < fullStars; i++) {
+    starsHtml += '★';
+  }
+  
+  // Add half star if needed
+  if (halfStar) {
+    starsHtml += '★';
+  }
+  
+  // Add empty stars
+  for (let i = 0; i < emptyStars; i++) {
+    starsHtml += '☆';
+  }
+  
+  return starsHtml;
+}
+
+// Generate position change visualization
+function generatePositionChangeHtml(positionChanges) {
+  // Count occurrences
+  const counts = {};
+  const total = positionChanges.length;
+  
+  positionChanges.forEach(change => {
+    counts[change] = (counts[change] || 0) + 1;
+  });
+  
+  // Group by general sentiment
+  const moreConvinced = (counts['Significantly more convinced'] || 0) + (counts['Somewhat more convinced'] || 0);
+  const unchanged = counts['No change'] || 0;
+  const lessConvinced = (counts['Significantly less convinced'] || 0) + (counts['Somewhat less convinced'] || 0);
+  
+  // Calculate percentages
+  const morePercent = Math.round((moreConvinced / total) * 100);
+  const unchangedPercent = Math.round((unchanged / total) * 100);
+  const lessPercent = Math.round((lessConvinced / total) * 100);
+  
+  // Generate HTML
+  return `
+  <div style="display: flex; margin-bottom: 20px;">
+    <div style="flex-grow: 1;">
+      <div style="height: 30px; background-color: #e8f5e9; border-radius: 5px; position: relative; overflow: hidden; margin-bottom: 5px;">
+        <div style="position: absolute; height: 100%; width: ${morePercent}%; background-color: #34a853; border-radius: 5px 0 0 5px;"></div>
+        <div style="position: absolute; height: 100%; left: ${morePercent}%; width: ${unchangedPercent}%; background-color: #fbbc04;"></div>
+        <div style="position: absolute; height: 100%; left: ${morePercent + unchangedPercent}%; width: ${lessPercent}%; background-color: #ea4335; border-radius: 0 5px 5px 0;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 12px;">
+        <div><span style="color: #34a853; font-weight: bold;">${morePercent}%</span> More convinced</div>
+        <div><span style="color: #fbbc04; font-weight: bold;">${unchangedPercent}%</span> No change</div>
+        <div><span style="color: #ea4335; font-weight: bold;">${lessPercent}%</span> Less convinced</div>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+// Improved function to get teacher email (add this to FeedbackProcessor.gs)
+function getTeacherEmail() {
+  // First try using the global teacherEmail variable if it exists and is not empty
+  if (typeof teacherEmail !== 'undefined' && teacherEmail) {
+    return teacherEmail;
+  }
+  
+  // If not available, try to load it from the spreadsheet
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const indexSheet = ss.getSheetByName('Index');
+    
+    if (indexSheet) {
+      const email = indexSheet.getRange('D2').getValue();
+      if (email) {
+        return email;
+      }
+    }
+  } catch (error) {
+    console.error("Error loading teacher email:", error);
+  }
+  
+  // Use the default as a last resort
+  return DEFAULT_TEACHER_EMAIL;
+}
+
+// Generate convincing elements visualization
+function generateConvincingElementsHtml(elements) {
+  // Count occurrences
+  const counts = {};
+  const total = elements.length;
+  
+  elements.forEach(element => {
+    counts[element] = (counts[element] || 0) + 1;
+  });
+  
+  // Sort by count (descending)
+  const sortedElements = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  
+  // Generate HTML for top 3 (or fewer if there are less)
+  let html = '';
+  const topElements = sortedElements.slice(0, 3);
+  
+  topElements.forEach(element => {
+    const count = counts[element];
+    const percentage = Math.round((count / total) * 100);
+    
+    html += `
+    <div class="convincing-item">
+      <div>${element}</div>
+      <div class="convince-bar">
+        <div class="convince-bar-fill" style="width: ${percentage}%;"></div>
+      </div>
+      <div class="convince-percentage">${percentage}%</div>
+    </div>
+    `;
+  });
+  
+  return html;
+}
+
+// Define inappropriate words list for comment sanitization
+const INAPPROPRIATE_WORDS = [
+  'damn', 'hell', 'crap', 'stupid', 'idiot', 'dumb', 'fool', 'jerk',
+  'suck', 'hate', 'terrible', 'awful', 'worst', 'bad', 'horrible'
+];
