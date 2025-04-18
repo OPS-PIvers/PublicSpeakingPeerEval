@@ -402,6 +402,11 @@ function calculateStatistics(evaluations) {
   let eyeContactSum = 0;
   let postureSum = 0;
   let vocalSum = 0;
+  let validBodyCount = 0;
+  let validDictionCount = 0;
+  let validEyeContactCount = 0;
+  let validPostureCount = 0;
+  let validVocalCount = 0;
   
   // Arrays for collecting data
   const positionChanges = [];
@@ -409,14 +414,42 @@ function calculateStatistics(evaluations) {
   const leastConvincing = [];
   const rhetoricalDevicesSet = new Set();
   
+  console.log("Processing evaluations for statistics:", JSON.stringify(evaluations));
+  
   // Process each evaluation
   evaluations.forEach(eval => {
-    // Add scores to sums
-    bodySum += parseFloat(eval.bodyScore) || 0;
-    dictionSum += parseFloat(eval.dictionScore) || 0;
-    eyeContactSum += parseFloat(eval.eyeContactScore) || 0;
-    postureSum += parseFloat(eval.postureScore) || 0;
-    vocalSum += parseFloat(eval.vocalScore) || 0;
+    console.log("Processing evaluation:", JSON.stringify(eval));
+    
+    // Add scores to sums - only count valid scores
+    if (eval.bodyScore && !isNaN(parseFloat(eval.bodyScore))) {
+      bodySum += parseFloat(eval.bodyScore);
+      validBodyCount++;
+      console.log(`Added body score: ${eval.bodyScore}, sum now: ${bodySum}, count: ${validBodyCount}`);
+    }
+    
+    if (eval.dictionScore && !isNaN(parseFloat(eval.dictionScore))) {
+      dictionSum += parseFloat(eval.dictionScore);
+      validDictionCount++;
+      console.log(`Added diction score: ${eval.dictionScore}, sum now: ${dictionSum}, count: ${validDictionCount}`);
+    }
+    
+    if (eval.eyeContactScore && !isNaN(parseFloat(eval.eyeContactScore))) {
+      eyeContactSum += parseFloat(eval.eyeContactScore);
+      validEyeContactCount++;
+      console.log(`Added eye contact score: ${eval.eyeContactScore}, sum now: ${eyeContactSum}, count: ${validEyeContactCount}`);
+    }
+    
+    if (eval.postureScore && !isNaN(parseFloat(eval.postureScore))) {
+      postureSum += parseFloat(eval.postureScore);
+      validPostureCount++;
+      console.log(`Added posture score: ${eval.postureScore}, sum now: ${postureSum}, count: ${validPostureCount}`);
+    }
+    
+    if (eval.vocalScore && !isNaN(parseFloat(eval.vocalScore))) {
+      vocalSum += parseFloat(eval.vocalScore);
+      validVocalCount++;
+      console.log(`Added vocal score: ${eval.vocalScore}, sum now: ${vocalSum}, count: ${validVocalCount}`);
+    }
     
     // Add feedback items to arrays
     if (eval.positionChange) positionChanges.push(eval.positionChange);
@@ -437,21 +470,24 @@ function calculateStatistics(evaluations) {
     }
   });
   
-  // Calculate averages
-  const count = evaluations.length;
+  // Calculate averages, avoiding division by zero
+  const totalCount = evaluations.length;
   
-  return {
-    bodyAverage: (bodySum / count).toFixed(1),
-    dictionAverage: (dictionSum / count).toFixed(1),
-    eyeContactAverage: (eyeContactSum / count).toFixed(1),
-    postureAverage: (postureSum / count).toFixed(1),
-    vocalAverage: (vocalSum / count).toFixed(1),
+  const stats = {
+    bodyAverage: validBodyCount > 0 ? (bodySum / validBodyCount).toFixed(1) : "0.0",
+    dictionAverage: validDictionCount > 0 ? (dictionSum / validDictionCount).toFixed(1) : "0.0",
+    eyeContactAverage: validEyeContactCount > 0 ? (eyeContactSum / validEyeContactCount).toFixed(1) : "0.0",
+    postureAverage: validPostureCount > 0 ? (postureSum / validPostureCount).toFixed(1) : "0.0",
+    vocalAverage: validVocalCount > 0 ? (vocalSum / validVocalCount).toFixed(1) : "0.0",
     positionChanges,
     mostConvincing,
     leastConvincing,
     rhetoricalDevices: Array.from(rhetoricalDevicesSet),
-    count
+    count: totalCount
   };
+  
+  console.log("Calculated statistics:", JSON.stringify(stats));
+  return stats;
 }
 
 // Organize feedback by category and filter out empty or "No comments provided"
