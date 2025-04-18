@@ -353,7 +353,7 @@ function saveEmailSettings(teacherEmail) {
   const indexSheet = ss.getSheetByName('Index');
   
   // Update teacher email in cell D2
-  indexSheet.getRange('D2').setValue(teacherEmail);
+  indexSheet.getRange('C2').setValue(teacherEmail);
   
   // Update the global variable
   loadStudentData(); // This refreshes the teacherEmail variable
