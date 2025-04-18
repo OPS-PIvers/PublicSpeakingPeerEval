@@ -601,7 +601,6 @@ function generatePositionChangeHtml(positionChanges) {
   `;
 }
 
-// Improved function to get teacher email (add this to FeedbackProcessor.gs)
 function getTeacherEmail() {
   // First try using the global teacherEmail variable if it exists and is not empty
   if (typeof teacherEmail !== 'undefined' && teacherEmail) {
@@ -614,7 +613,8 @@ function getTeacherEmail() {
     const indexSheet = ss.getSheetByName('Index');
     
     if (indexSheet) {
-      const email = indexSheet.getRange('D2').getValue();
+      // Changed from D2 to C2 to match loadStudentData() function
+      const email = indexSheet.getRange('C2').getValue();
       if (email) {
         return email;
       }
