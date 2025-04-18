@@ -30,18 +30,20 @@ function loadStudentData() {
   // Skip the header row (row 1)
   studentData = [];
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0]) { // Only add if there's a first name
+    // Only add if there's a non-empty name in column A
+    if (data[i][0] && data[i][0].toString().trim() !== '') {
       studentData.push({
-        firstName: data[i][0],
-        lastName: data[i][1],
-        email: data[i][2],
-        fullName: data[i][0] + ' ' + data[i][1]
+        fullName: data[i][0],    // Column A for full name
+        email: data[i][1]        // Column B for email
       });
     }
   }
   
-  // Get teacher email from cell D2
-  teacherEmail = data[1][3];
+  // Sort the student data alphabetically by fullName
+  studentData.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  
+  // Get teacher email from cell C2 (based on your spreadsheet structure)
+  teacherEmail = data.length > 1 && data[1].length > 2 ? data[1][2] : '';
 }
 
 // Return student data to the client-side JavaScript
@@ -80,10 +82,19 @@ function processForm(formData) {
   }
 }
 
-// Send emails to the teacher and presenter
+// Updated sendEmails function 
 function sendEmails(formData) {
+  // Force reload student data
+  loadStudentData();
+  
   // Find presenter email
   const presenterEmail = findPresenterEmail(formData.presenterName);
+  
+  if (!presenterEmail) {
+    console.error("Failed to find email for presenter: " + formData.presenterName);
+  } else {
+    console.log("Found presenter email: " + presenterEmail);
+  }
   
   // Create email content
   const subject = 'Speech Evaluation: ' + formData.presenterName + ' (evaluated by ' + formData.evaluatorName + ')';
@@ -288,12 +299,11 @@ function saveToSheet(formData) {
       return value !== undefined && value !== null ? value : defaultValue;
     };
     
-    // Create a row array with all the form data
+    // Modified row array order to match your spreadsheet
     const rowData = [
       timestamp,                           // Timestamp
       safeGet(formData.evaluatorName),     // Evaluator Name
       safeGet(formData.presenterName),     // Presenter Name
-      presenterEmail,                      // Presenter Email
       safeGet(formData.initialPosition),   // Initial Position
       safeGet(formData.bodyScore),         // Body Score
       safeGet(formData.bodyComments, 'No comments provided'),  // Body Comments
@@ -331,11 +341,21 @@ function include(filename) {
 
 // Find a presenter's email from their full name
 function findPresenterEmail(fullName) {
+  console.log("Looking for email for presenter: " + fullName);
+  console.log("Current student data: " + JSON.stringify(studentData));
+  
+  // Force reload student data to ensure it's fresh
+  loadStudentData();
+  console.log("Refreshed student data: " + JSON.stringify(studentData));
+  
   for (let i = 0; i < studentData.length; i++) {
     if (studentData[i].fullName === fullName) {
+      console.log("Found email for " + fullName + ": " + studentData[i].email);
       return studentData[i].email;
     }
   }
+  
+  console.log("No email found for: " + fullName);
   return '';
 }
 
@@ -349,36 +369,64 @@ function getPresenterEvaluations(presenterName) {
   // Get all data from the sheet
   const data = sheet.getDataRange().getValues();
   
-  // Skip the header row if it exists
-  const headerRow = 0;
+  // Use the first row as headers
+  const headers = data[0];
+  console.log("Sheet headers:", JSON.stringify(headers));
+  
+  // Find indexes of important columns
+  const timestampIndex = 0;
+  const evaluatorNameIndex = 1;
+  const presenterNameIndex = 2;
+  const initialPositionIndex = 3;
+  const bodyScoreIndex = 4;
+  const bodyCommentsIndex = 5;
+  const dictionScoreIndex = 6;
+  const rhetoricalDevicesIndex = 7;
+  const dictionCommentsIndex = 8;
+  const eyeContactScoreIndex = 9;
+  const postureScoreIndex = 10;
+  const vocalScoreIndex = 11;
+  const deliveryCommentsIndex = 12;
+  const positionChangeIndex = 13;
+  const mostConvincingIndex = 14;
+  const leastConvincingIndex = 15;
+  const didWellIndex = 16;
+  const improvementIndex = 17;
   
   // Filter by presenter name
   const evaluations = [];
-  for (let i = headerRow + 1; i < data.length; i++) {
+  for (let i = 1; i < data.length; i++) {
+    // Skip empty rows
+    if (!data[i][presenterNameIndex]) continue;
+    
     // Presenter name is in column C (index 2)
-    if (data[i][2] === presenterName) {
-      evaluations.push({
-        timestamp: data[i][0],
-        evaluatorName: data[i][1],
-        presenterName: data[i][2],
-        presenterEmail: data[i][3],
-        initialPosition: data[i][4],
-        bodyScore: parseFloat(data[i][5]),
-        bodyComments: data[i][6],
-        dictionScore: parseFloat(data[i][7]),
-        rhetoricalDevices: data[i][8],
-        dictionComments: data[i][9],
-        eyeContactScore: parseFloat(data[i][10]),
-        postureScore: parseFloat(data[i][11]),
-        deliveryComments: data[i][12],
-        positionChange: data[i][13],
-        mostConvincing: data[i][14],
-        leastConvincing: data[i][15],
-        didWell: data[i][16],
-        improvement: data[i][17]
-      });
+    if (data[i][presenterNameIndex] === presenterName) {
+      const evaluation = {
+        timestamp: data[i][timestampIndex],
+        evaluatorName: data[i][evaluatorNameIndex],
+        presenterName: data[i][presenterNameIndex],
+        initialPosition: data[i][initialPositionIndex],
+        bodyScore: data[i][bodyScoreIndex],
+        bodyComments: data[i][bodyCommentsIndex],
+        dictionScore: data[i][dictionScoreIndex],
+        rhetoricalDevices: data[i][rhetoricalDevicesIndex],
+        dictionComments: data[i][dictionCommentsIndex],
+        eyeContactScore: data[i][eyeContactScoreIndex],
+        postureScore: data[i][postureScoreIndex],
+        vocalScore: data[i][vocalScoreIndex],
+        deliveryComments: data[i][deliveryCommentsIndex],
+        positionChange: data[i][positionChangeIndex],
+        mostConvincing: data[i][mostConvincingIndex],
+        leastConvincing: data[i][leastConvincingIndex],
+        didWell: data[i][didWellIndex],
+        improvement: data[i][improvementIndex]
+      };
+      evaluations.push(evaluation);
     }
   }
+  
+  console.log("Found " + evaluations.length + " evaluations for " + presenterName);
+  console.log("Sample evaluation data:", JSON.stringify(evaluations[0]));
   
   return evaluations;
 }
@@ -673,3 +721,18 @@ function debugSheetAccess() {
   }
 }
 */
+
+// Function to log student data for debugging
+function debugStudentData() {
+  loadStudentData();
+  
+  const studentInfo = studentData.map(student => ({
+    name: student.fullName,
+    email: student.email
+  }));
+  
+  console.log("Student data loaded:");
+  console.log(JSON.stringify(studentInfo, null, 2));
+  
+  return studentInfo;
+}
