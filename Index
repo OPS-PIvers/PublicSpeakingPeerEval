@@ -620,18 +620,34 @@
         toggle.addEventListener('click', function() {
           const isVisible = box.classList.toggle('visible');
           
-          // Change the icon and text based on visibility
+          // Get the icon element
           const icon = this.querySelector('.material-icons');
-          if (isVisible) {
-            icon.textContent = 'remove_circle_outline';
-            this.textContent = this.textContent.replace('Add', 'Hide');
-          } else {
-            icon.textContent = 'add_circle_outline';
-            this.textContent = this.textContent.replace('Hide', 'Add');
+          
+          // First, remove all child nodes
+          while (this.firstChild) {
+            this.removeChild(this.firstChild);
           }
           
-          // Re-add the icon since textContent replaced it
-          this.prepend(icon);
+          // Then add back the icon with updated text
+          if (isVisible) {
+            // Create new icon element
+            const newIcon = document.createElement('span');
+            newIcon.className = 'material-icons';
+            newIcon.textContent = 'remove_circle_outline';
+            
+            // Add the icon and text
+            this.appendChild(newIcon);
+            this.appendChild(document.createTextNode(' Hide Comments'));
+          } else {
+            // Create new icon element
+            const newIcon = document.createElement('span');
+            newIcon.className = 'material-icons';
+            newIcon.textContent = 'add_circle_outline';
+            
+            // Add the icon and text
+            this.appendChild(newIcon);
+            this.appendChild(document.createTextNode(' Add Comments'));
+          }
         });
       }
       
