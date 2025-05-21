@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <?!= include('Stylesheet'); ?>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Speech Peer Evaluation</h1>
+        <div id="resultMessage" class="result-message" style="display: none;"></div>
+      </header>
+      
+      <form id="evaluationForm" onsubmit="handleFormSubmit(event)">
+        <!-- Hidden field for speech type -->
+        <input type="hidden" id="speechTypeField" name="speechType" value="">
+        
+        <!-- Accordion sections will be generated dynamically -->
+        <div class="accordion" id="formAccordion">
+          <!-- Loading indicator -->
+          <div id="loadingIndicator" style="text-align: center; padding: 20px;">
+            <p>Loading evaluation form...</p>
+          </div>
+        </div>
+      </form>
+    </div>
+    
+    <script>
+      // ==== INITIALIZATION ====
+      
+      // Initialize page
+      document.addEventListener('DOMContentLoaded', function() {
+        initPage();
+      });
+      
+      // Initialize page functions
+      function initPage() {
+        // Get speech type from URL parameter or default
+        const speechType = "<?= speechType ?>";
+        document.getElementById('speechTypeField').value = speechType;
+        
+        // Log the speech type
+        console.log("Initializing form for speech type:", speechType);
+        
+        // Fetch speech configuration from server
+        google.script.run
+          .withSuccessHandler(buildForm)
+          .withFailureHandler(handleError)
+          .getSpeechConfiguration(speechType);
+      }
+      
+      // Handle configuration loading error
+      function handleError(error) {
+        console.error("Error loading configuration:", error);
+        showResultMessage("Error loading evaluation form: " + (error.message || error), false);
+        
+        // Remove loading indicator
+        document.getElementById('loadingIndicator').remove();
+      }
+      
+      // ==== FORM BUILDING ====
+      
+      // Build the form based on configuration
+      function buildForm(config) {
+        console.log("Building form with configuration:", config);
+        
+        if (config.error) {
+          showResultMessage(config.error, false);
+          return;
+        }
+        
+        // Set page title
+        document.querySelector('header h1').textContent = config.title;
+        
+        // Clear loading indicator
+        const accordion = document.getElementById('formAccordion');
+        accordion.innerHTML = '';
+        
+        // Add a final "Review" section if not already included
+        let hasReviewSection = config.sections.some(section => section.title.includes('Review'));
+        if (!hasReviewSection) {
+          config.sections.push({
+            id: config.sections.length + 1,
+            title: "Review Your Evaluation",
+            questions: []
+          });
+        }
+        
+        // Build each section
+        config.sections.forEach((section, index) => {
+          const sectionElem = buildSection(section, index, config.sections);
+          accordion.appendChild(sectionElem);
+        });
+        
+        console.log("Form built successfully with", config.sections.length, "sections");
+        
+        // Set up event handlers
+        setupFormEventHandlers();
+        
+        // Load student data for dropdowns
+        loadStudentData();
+      }
+      
+      // Build a single section
+      function buildSection(section, index, allSections) {
+        const sectionElem = document.createElement('div');
+        sectionElem.className = 'accordion-item' + (index === 0 ? ' active' : '');
+        sectionElem.id = 'section' + section.id;
+        
+        // Create section header
+        const headerElem = document.createElement('div');
+        headerElem.className = 'accordion-header';
+        headerElem.innerHTML = `
+          <h2>${section.id}. ${section.title}</h2>
+          <span class="expand-icon material-icons">${index === 0 ? 'expand_less' : 'expand_more'}</span>
+        `;
+        
+        // Create section content
+        const contentElem = document.createElement('div');
+        contentElem.className = 'accordion-content';
+        contentElem.style.display = index === 0 ? 'block' : 'none';
+        
+        // Build questions for this section (skip for review section)
+        if (section.questions && section.questions.length > 0) {
+          section.questions.forEach(question => {
+            const questionElem = buildQuestionElement(question);
+            contentElem.appendChild(questionElem);
+          });
+        } else if (section.title.includes('Review')) {
+          // Add summary container for review section
+          const summaryContainer = document.createElement('div');
+          summaryContainer.className = 'summary-container';
+          summaryContainer.innerHTML = '<div id="summaryContent"></div>';
+          contentElem.appendChild(summaryContainer);
+        }
+        
+        // Add validation message
+        const validationElem = document.createElement('div');
+        validationElem.className = 'validation-message';
+        validationElem.id = 'section' + section.id + 'Validation';
+        contentElem.appendChild(validationElem);
+        
+        // Add navigation buttons
+        const buttonRow = document.createElement('div');
+        buttonRow.className = 'button-row';
+        
+        // Previous button (except for first section)
+        if (index > 0) {
+          const prevButton = document.createElement('button');
+          prevButton.type = 'button';
+          prevButton.className = 'prev-button';
+          prevButton.innerHTML = '<span class="material-icons">arrow_back</span> Previous';
+          prevButton.onclick = function() {
+            navigateToPreviousSection('section' + section.id);
+          };
+          buttonRow.appendChild(prevButton);
+        }
+        
+        // Next button or Submit button for last section
+        if (index < allSections.length - 1) {
+          const nextButton = document.createElement('button');
+          nextButton.type = 'button';
+          nextButton.className = 'next-button';
+          
+          // If going to review section, label "Review"
+          const isNextReview = allSections[index+1].title.includes('Review');
+          nextButton.innerHTML = isNextReview ? 
+            'Review <span class="material-icons">arrow_forward</span>' : 
+            'Next <span class="material-icons">arrow_forward</span>';
+            
+          nextButton.onclick = function() {
+            navigateToNextSection('section' + section.id, 'section' + allSections[index+1].id);
+          };
+          buttonRow.appendChild(nextButton);
+        } else {
+          // Submit button for last section
+          const submitButton = document.createElement('button');
+          submitButton.type = 'submit';
+          submitButton.id = 'submitBtn';
+          submitButton.className = 'submit-button';
+          submitButton.textContent = 'Submit Evaluation';
+          buttonRow.appendChild(submitButton);
+        }
+        
+        contentElem.appendChild(buttonRow);
+        
+        // Assemble section
+        sectionElem.appendChild(headerElem);
+        sectionElem.appendChild(contentElem);
+        
+        return sectionElem;
+      }
+      
+      // Build question element based on question type
+      function buildQuestionElement(question) {
+        const formGroup = document.createElement('div');
+        formGroup.className = 'form-group';
+        formGroup.dataset.questionId = question.id;
+        
+        // Create label
+        const label = document.createElement('label');
+        label.textContent = question.text;
+        label.htmlFor = question.id;
+        formGroup.appendChild(label);
+        
+        // Create question input based on type
+        switch (question.type.toLowerCase()) {
+          case 'dropdown':
+            // Dropdown will be populated with student names later
+            const selectId = question.id + 'Select';
+            const select = document.createElement('select');
+            select.id = selectId;
+            select.innerHTML = '<option value="">Select an option</option>';
+            
+            // Add change handler
+            select.onchange = function() {
+              document.getElementById(question.id).value = this.value;
+            };
+            
+            formGroup.appendChild(select);
+            
+            // Add hidden input for the actual value
+            const hiddenInput = document.createElement('input');
+            hiddenInput.type = 'hidden';
+            hiddenInput.id = question.id;
+            hiddenInput.name = question.id;
+            formGroup.appendChild(hiddenInput);
+            break;
+            
+          case 'option':
+            // Option buttons (single select)
+            const optionsContainer = document.createElement('div');
+            optionsContainer.id = question.id + 'Options';
+            optionsContainer.className = 'option-buttons';
+            
+            question.options.forEach(option => {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'option-button';
+              button.setAttribute('data-value', option);
+              button.textContent = option;
+              optionsContainer.appendChild(button);
+            });
+            
+            formGroup.appendChild(optionsContainer);
+            
+            // Add hidden input for the selected value
+            const optionInput = document.createElement('input');
+            optionInput.type = 'hidden';
+            optionInput.id = question.id;
+            optionInput.name = question.id;
+            formGroup.appendChild(optionInput);
+            break;
+            
+          case 'checkbox':
+            // Checkbox buttons (multi-select)
+            const checkboxContainer = document.createElement('div');
+            checkboxContainer.id = question.id + 'Options';
+            checkboxContainer.className = 'checkbox-buttons';
+            
+            question.options.forEach(option => {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'checkbox-button';
+              button.setAttribute('data-value', option);
+              button.textContent = option;
+              checkboxContainer.appendChild(button);
+            });
+            
+            formGroup.appendChild(checkboxContainer);
+            
+            // Add hidden input for selected values
+            const checkboxInput = document.createElement('input');
+            checkboxInput.type = 'hidden';
+            checkboxInput.id = question.id;
+            checkboxInput.name = question.id;
+            checkboxInput.value = '[]'; // Default empty array as JSON
+            formGroup.appendChild(checkboxInput);
+            break;
+            
+          case 'rubric':
+            // Rubric grid
+            const rubricGrid = document.createElement('div');
+            rubricGrid.className = 'rubric-grid';
+            
+            const rubricRow = document.createElement('div');
+            rubricRow.className = 'rubric-row';
+            
+            // Create cells from max score to min score
+            const maxScore = parseInt(question.maxScore) || 5;
+            const minScore = parseInt(question.minScore) || 1;
+            
+            for (let score = maxScore; score >= minScore; score--) {
+              const cell = document.createElement('div');
+              cell.className = 'rubric-cell';
+              cell.setAttribute('data-value', score);
+              
+              const ratingDiv = document.createElement('div');
+              ratingDiv.className = 'rubric-rating';
+              ratingDiv.textContent = score;
+              
+              const descDiv = document.createElement('div');
+              descDiv.className = 'rubric-description';
+              
+              // Get the description for this score level
+              const index = maxScore - score;
+              if (question.scoreCriteria && question.scoreCriteria[index]) {
+                descDiv.textContent = question.scoreCriteria[index];
+              } else {
+                descDiv.textContent = `Score ${score}`;
+              }
+              
+              cell.appendChild(ratingDiv);
+              cell.appendChild(descDiv);
+              rubricRow.appendChild(cell);
+            }
+            
+            rubricGrid.appendChild(rubricRow);
+            formGroup.appendChild(rubricGrid);
+            
+            // Add hidden input for the score
+            const scoreInput = document.createElement('input');
+            scoreInput.type = 'hidden';
+            scoreInput.id = question.id;
+            scoreInput.name = question.id;
+            formGroup.appendChild(scoreInput);
+            break;
+            
+          case 'comment':
+            // Comments toggle and box
+            const commentId = question.id;
+            const toggleId = commentId + 'Toggle';
+            const boxId = commentId + 'Box';
+            
+            const commentsToggle = document.createElement('button');
+            commentsToggle.type = 'button';
+            commentsToggle.id = toggleId;
+            commentsToggle.className = 'comments-toggle';
+            commentsToggle.innerHTML = '<span class="material-icons">add_circle_outline</span> Add Comments';
+            
+            const commentsBox = document.createElement('div');
+            commentsBox.id = boxId;
+            commentsBox.className = 'comments-box';
+            
+            const textarea = document.createElement('textarea');
+            textarea.id = commentId;
+            textarea.name = commentId;
+            textarea.rows = 3;
+            textarea.placeholder = `Add comments about ${question.text.toLowerCase()}...`;
+            
+            commentsBox.appendChild(textarea);
+            formGroup.appendChild(commentsToggle);
+            formGroup.appendChild(commentsBox);
+            break;
+            
+          default:
+            // Text input as fallback
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.id = question.id;
+            textInput.name = question.id;
+            if (question.defaultValue) {
+              textInput.value = question.defaultValue;
+            }
+            formGroup.appendChild(textInput);
+        }
+        
+        return formGroup;
+      }
+      
+      // ==== FORM EVENT HANDLERS ====
+      
+      // Set up all form event handlers
+      function setupFormEventHandlers() {
+        setupAccordionHandlers();
+        setupOptionButtonHandlers();
+        setupCheckboxButtonHandlers();
+        setupRubricCellHandlers();
+        setupCommentsToggleHandlers();
+      }
+      
+      // Set up accordion section handlers
+      function setupAccordionHandlers() {
+        const headers = document.querySelectorAll('.accordion-header');
+        
+        headers.forEach(header => {
+          header.addEventListener('click', function() {
+            const section = this.parentElement;
+            if (!section.classList.contains('active')) {
+              expandSection(section.id);
+            }
+          });
+        });
+      }
+      
+      // Setup option buttons (single select)
+      function setupOptionButtonHandlers() {
+        const containers = document.querySelectorAll('.option-buttons');
+        
+        containers.forEach(container => {
+          const buttons = container.querySelectorAll('.option-button');
+          const hiddenInputId = container.id.replace('Options', '');
+          const hiddenInput = document.getElementById(hiddenInputId);
+          
+          if (!hiddenInput) return;
+          
+          buttons.forEach(button => {
+            button.addEventListener('click', function() {
+              // Remove selected class from all buttons
+              buttons.forEach(btn => btn.classList.remove('selected'));
+              
+              // Add selected class to clicked button
+              this.classList.add('selected');
+              
+              // Update hidden input value
+              hiddenInput.value = this.getAttribute('data-value');
+            });
+          });
+        });
+      }
+      
+      // Setup checkbox buttons (multi-select)
+      function setupCheckboxButtonHandlers() {
+        const containers = document.querySelectorAll('.checkbox-buttons');
+        
+        containers.forEach(container => {
+          const buttons = container.querySelectorAll('.checkbox-button');
+          const hiddenInputId = container.id.replace('Options', '');
+          const hiddenInput = document.getElementById(hiddenInputId);
+          
+          if (!hiddenInput) return;
+          
+          buttons.forEach(button => {
+            button.addEventListener('click', function() {
+              // Toggle selected class
+              this.classList.toggle('selected');
+              
+              // Update hidden input with all selected values
+              const selectedButtons = container.querySelectorAll('.checkbox-button.selected');
+              const selectedValues = Array.from(selectedButtons).map(btn => btn.getAttribute('data-value'));
+              hiddenInput.value = JSON.stringify(selectedValues);
+            });
+          });
+        });
+      }
+      
+      // Setup rubric cells
+      function setupRubricCellHandlers() {
+        const cells = document.querySelectorAll('.rubric-cell');
+        
+        cells.forEach(cell => {
+          cell.addEventListener('click', function() {
+            const grid = this.closest('.rubric-grid');
+            const row = this.closest('.rubric-row');
+            const hiddenInput = grid.nextElementSibling;
+            
+            // Remove selected class from all cells in this row
+            row.querySelectorAll('.rubric-cell').forEach(c => {
+              c.classList.remove('selected');
+            });
+            
+            // Add selected class to this cell
+            this.classList.add('selected');
+            
+            // Update the hidden input value
+            hiddenInput.value = this.getAttribute('data-value');
+          });
+        });
+      }
+      
+      // Setup comments toggles
+      function setupCommentsToggleHandlers() {
+        const toggles = document.querySelectorAll('.comments-toggle');
+        
+        toggles.forEach(toggle => {
+          const boxId = toggle.id.replace('Toggle', 'Box');
+          const box = document.getElementById(boxId);
+          
+          if (!box) return;
+          
+          toggle.addEventListener('click', function() {
+            const isVisible = box.classList.toggle('visible');
+            
+            if (isVisible) {
+              this.innerHTML = '<span class="material-icons">remove_circle_outline</span> Hide Comments';
+            } else {
+              this.innerHTML = '<span class="material-icons">add_circle_outline</span> Add Comments';
+            }
+          });
+        });
+      }
+      
+      // ==== NAVIGATION ====
+      
+      // Expand a section and collapse others
+      function expandSection(sectionId) {
+        const sections = document.querySelectorAll('.accordion-item');
+        
+        sections.forEach(section => {
+          const isTarget = section.id === sectionId;
+          section.classList.toggle('active', isTarget);
+          
+          // Update content display
+          const content = section.querySelector('.accordion-content');
+          content.style.display = isTarget ? 'block' : 'none';
+          
+          // Update icon
+          const icon = section.querySelector('.expand-icon');
+          icon.textContent = isTarget ? 'expand_less' : 'expand_more';
+        });
+        
+        // Scroll to the expanded section
+        document.getElementById(sectionId).scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'start' 
+        });
+      }
+      
+      // Navigate to next section
+      function navigateToNextSection(currentSectionId, nextSectionId) {
+        // Validate current section first
+        if (!validateSection(currentSectionId)) {
+          return;
+        }
+        
+        // If going to review section, generate summary
+        if (document.getElementById(nextSectionId).querySelector('.summary-container')) {
+          generateSummary();
+        }
+        
+        // Expand next section
+        expandSection(nextSectionId);
+      }
+      
+      // Navigate to previous section
+      function navigateToPreviousSection(currentSectionId) {
+        // Find previous section ID
+        const sections = Array.from(document.querySelectorAll('.accordion-item'));
+        const currentIndex = sections.findIndex(section => section.id === currentSectionId);
+        
+        if (currentIndex > 0) {
+          const prevSectionId = sections[currentIndex - 1].id;
+          expandSection(prevSectionId);
+        }
+      }
+      
+      // ==== VALIDATION ====
+      
+      // Validate a section
+      function validateSection(sectionId) {
+        const section = document.getElementById(sectionId);
+        if (!section) return false;
+        
+        const validationMessage = document.getElementById(sectionId + 'Validation');
+        if (!validationMessage) return false;
+        
+        // Clear previous validation message
+        validationMessage.textContent = '';
+        
+        // Get all form groups in this section
+        const formGroups = section.querySelectorAll('.form-group');
+        
+        for (const group of formGroups) {
+          // Skip comment fields - they're optional
+          if (group.querySelector('textarea')) continue;
+          
+          // Check hidden inputs (main data storage)
+          const hiddenInputs = group.querySelectorAll('input[type="hidden"]');
+          for (const input of hiddenInputs) {
+            // Skip speechType field or optional fields
+            if (input.id === 'speechTypeField' || input.id.includes('Comment')) continue;
+            
+            // If the input is empty, show validation message
+            if (!input.value) {
+              const label = group.querySelector('label');
+              validationMessage.textContent = `Please complete: ${label ? label.textContent : input.id}`;
+              return false;
+            }
+          }
+        }
+        
+        return true;
+      }
+      
+      // ==== STUDENT DATA ====
+      
+      // Load student data for dropdowns
+      function loadStudentData() {
+        google.script.run
+          .withSuccessHandler(populateStudentDropdowns)
+          .withFailureHandler(function(error) {
+            console.error("Error loading student data:", error);
+            showResultMessage("Error loading student data: " + error, false);
+          })
+          .getStudentData();
+      }
+      
+      // Populate student dropdowns with data from server
+      function populateStudentDropdowns(students) {
+        console.log("Received student data:", JSON.stringify(students));
+        
+        // Find select elements for student names
+        const evaluatorSelect = document.getElementById('evaluatorNameSelect');
+        const presenterSelect = document.getElementById('presenterNameSelect');
+        
+        // Check if elements exist
+        if (!evaluatorSelect || !presenterSelect) {
+          console.error("Student dropdown elements not found. This may be normal if there are no student fields in this form.");
+          return;
+        }
+        
+        // Clear existing options
+        evaluatorSelect.innerHTML = '<option value="">Select your name</option>';
+        presenterSelect.innerHTML = '<option value="">Select presenter</option>';
+        
+        // Check if we have valid student data
+        if (!students || !Array.isArray(students) || students.length === 0) {
+          console.error("No valid student data received");
+          return;
+        }
+        
+        // Add students to both dropdowns
+        students.forEach(student => {
+          const displayName = student.fullName;
+          
+          if (!displayName) {
+            console.warn("Student has no name", student);
+            return;
+          }
+          
+          const evaluatorOption = document.createElement('option');
+          evaluatorOption.value = displayName;
+          evaluatorOption.textContent = displayName;
+          evaluatorSelect.appendChild(evaluatorOption);
+          
+          const presenterOption = document.createElement('option');
+          presenterOption.value = displayName;
+          presenterOption.textContent = displayName;
+          presenterSelect.appendChild(presenterOption);
+        });
+        
+        console.log("Dropdowns populated with", students.length, "students");
+      }
+      
+      // ==== SUMMARY & SUBMISSION ====
+      
+      // Generate summary for review section
+      function generateSummary() {
+        const summaryContent = document.getElementById('summaryContent');
+        if (!summaryContent) {
+          console.error("Summary content container not found");
+          return;
+        }
+        
+        // Clear previous content
+        summaryContent.innerHTML = '';
+        
+        // Get all hidden inputs (except speechType)
+        const hiddenInputs = Array.from(document.querySelectorAll('input[type="hidden"]'))
+          .filter(input => input.id !== 'speechTypeField');
+        
+        // Sort the inputs by section order
+        hiddenInputs.sort((a, b) => {
+          const aSection = a.closest('.accordion-item');
+          const bSection = b.closest('.accordion-item');
+          
+          if (!aSection || !bSection) return 0;
+          
+          const aIndex = Array.from(document.querySelectorAll('.accordion-item')).indexOf(aSection);
+          const bIndex = Array.from(document.querySelectorAll('.accordion-item')).indexOf(bSection);
+          
+          return aIndex - bIndex;
+        });
+        
+        // Process each hidden input
+        const processedIds = new Set();
+        
+        hiddenInputs.forEach(input => {
+          // Skip if already processed or empty ID
+          if (!input.id || processedIds.has(input.id)) return;
+          
+          // Mark as processed
+          processedIds.add(input.id);
+          
+          // Skip comments fields
+          if (input.id.includes('Comment')) return;
+          
+          // Get label text
+          const formGroup = input.closest('.form-group');
+          let labelText = input.id;
+          
+          if (formGroup) {
+            const label = formGroup.querySelector('label');
+            if (label) {
+              labelText = label.textContent;
+            }
+          }
+          
+          // Get formatted value
+          let displayValue = input.value;
+          
+          // Special handling for various field types
+          if (input.id === 'rhetoricalDevices' && displayValue) {
+            try {
+              // Parse JSON array
+              const devices = JSON.parse(displayValue);
+              displayValue = devices.join(', ') || 'None selected';
+            } catch (e) {
+              // If parsing fails, use as is
+              displayValue = displayValue || 'None selected';
+            }
+          }
+          
+          // Add score indicator for score fields
+          if (input.id.includes('Score')) {
+            const maxScore = 5; // Default max score
+            displayValue = displayValue + '/' + maxScore;
+          }
+          
+          // Add to summary
+          addSummaryItem(summaryContent, labelText, displayValue);
+          
+          // Add related comments if they exist
+          const commentId = input.id.replace('Score', 'Comments');
+          const commentElem = document.getElementById(commentId);
+          
+          if (commentElem && commentElem.value) {
+            addSummaryItem(summaryContent, labelText + ' Comments', commentElem.value);
+          }
+        });
+      }
+      
+      // Add item to summary
+      function addSummaryItem(container, label, value) {
+        const item = document.createElement('div');
+        item.className = 'summary-item';
+        
+        const labelElem = document.createElement('div');
+        labelElem.className = 'summary-label';
+        labelElem.textContent = label + ':';
+        
+        const valueElem = document.createElement('div');
+        valueElem.className = 'summary-value';
+        valueElem.textContent = value;
+        
+        item.appendChild(labelElem);
+        item.appendChild(valueElem);
+        container.appendChild(item);
+      }
+      
+      // Handle form submission
+      function handleFormSubmit(event) {
+        event.preventDefault();
+        
+        // Validate all sections
+        const sections = Array.from(document.querySelectorAll('.accordion-item'));
+        
+        // Skip the last section (review)
+        for (let i = 0; i < sections.length - 1; i++) {
+          if (!validateSection(sections[i].id)) {
+            expandSection(sections[i].id);
+            return;
+          }
+        }
+        
+        // Collect form data
+        const formData = {
+          speechType: document.getElementById('speechTypeField').value
+        };
+        
+        // Get all hidden inputs
+        document.querySelectorAll('input[type="hidden"]').forEach(input => {
+          if (input.id && input.id !== 'speechTypeField') {
+            formData[input.id] = input.value || '';
+          }
+        });
+        
+        // Get all textareas
+        document.querySelectorAll('textarea').forEach(textarea => {
+          if (textarea.id) {
+            formData[textarea.id] = textarea.value || 'No comments provided';
+          }
+        });
+        
+        console.log("Submitting form data:", formData);
+        
+        // Disable submit button
+        const submitBtn = document.getElementById('submitBtn');
+        if (submitBtn) {
+          const originalText = submitBtn.textContent;
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Submitting...';
+          
+          // Submit form data
+          google.script.run
+            .withSuccessHandler(function(response) {
+              console.log("Form submission response:", response);
+              showResultMessage(response.message, response.success);
+              
+              if (response.success) {
+                // Reset form (reload page)
+                setTimeout(function() {
+                  window.location.reload();
+                }, 2000);
+              } else {
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+              }
+            })
+            .withFailureHandler(function(error) {
+              console.error("Form submission error:", error);
+              showResultMessage('Error submitting form: ' + error, false);
+              
+              // Re-enable submit button
+              submitBtn.disabled = false;
+              submitBtn.textContent = originalText;
+            })
+            .processForm(formData);
+        }
+      }
+      
+      // ==== UTILITIES ====
+      
+      // Show result message
+      function showResultMessage(message, isSuccess) {
+        const resultMessage = document.getElementById('resultMessage');
+        resultMessage.textContent = message;
+        resultMessage.className = 'result-message ' + (isSuccess ? 'success' : 'error');
+        resultMessage.style.display = 'block';
+        
+        // Scroll to top
+        window.scrollTo(0, 0);
+        
+        // Hide message after 5 seconds
+        setTimeout(function() {
+          resultMessage.style.display = 'none';
+        }, 5000);
+      }
+    </script>
+  </body>
+</html>
