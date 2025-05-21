@@ -3,24 +3,22 @@
 
 // Global variables
 let studentData = [];
-let teacherEmail = '';
+let teacherEmail = ''; // This will be populated by loadStudentData
 
 // Main function to serve the web app HTML
 function doGet(e) {
-  // Load student data
-  loadStudentData();
+  // Load student data early
+  loadStudentData(); 
   
-  // Get speech type from URL parameter or settings
   let speechType = e.parameter.type;
-  
-  // If no speech type in URL, get from settings
   if (!speechType) {
     speechType = getActiveSpeechType();
   }
   
-  // Create and return the HTML content
   const template = HtmlService.createTemplateFromFile('Index');
   template.speechType = speechType;
+  // MODIFICATION: Add script URL to the template
+  template.scriptUrl = ScriptApp.getService().getUrl(); 
   
   return template.evaluate()
       .setTitle('Speech Peer Evaluation')
@@ -39,16 +37,16 @@ function getActiveSpeechType() {
       // Create settings sheet if it doesn't exist
       const newSheet = ss.insertSheet('Settings');
       newSheet.getRange('A1:B1').setValues([['Setting', 'Value']]);
-      newSheet.getRange('A2:B2').setValues([['ActiveSpeechType', 'persuasive']]);
-      newSheet.getRange('A:B').setFontWeight('bold');
-      return 'persuasive'; // Default
+      newSheet.getRange('A1:B1').setFontWeight('bold'); // Make header bold
+      newSheet.getRange('A2:B2').setValues([['ActiveSpeechType', 'persuasive']]); // Default
+      SpreadsheetApp.flush(); // Ensure sheet is created before trying to read again if needed
+      return 'persuasive'; 
     }
     
-    // Find the ActiveSpeechType setting
     const data = settingsSheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
+    for (let i = 1; i < data.length; i++) { // Start from 1 to skip header
       if (data[i][0] === 'ActiveSpeechType') {
-        return data[i][1] || 'persuasive';
+        return data[i][1] || 'persuasive'; // Default if value is empty
       }
     }
     
@@ -69,355 +67,403 @@ function setActiveSpeechType(speechType) {
     let settingsSheet = ss.getSheetByName('Settings');
     
     if (!settingsSheet) {
-      // Create settings sheet if it doesn't exist
       settingsSheet = ss.insertSheet('Settings');
       settingsSheet.getRange('A1:B1').setValues([['Setting', 'Value']]);
       settingsSheet.getRange('A1:B1').setFontWeight('bold');
-      settingsSheet.getRange('A2:B2').setValues([['ActiveSpeechType', speechType]]);
-      return { success: true, message: `Active speech type set to "${speechType}"` };
     }
     
-    // Find the ActiveSpeechType setting
     const data = settingsSheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
+    let found = false;
+    for (let i = 1; i < data.length; i++) { // Start from 1 to skip header
       if (data[i][0] === 'ActiveSpeechType') {
-        // Update the value
         settingsSheet.getRange(i + 1, 2).setValue(speechType);
-        return { success: true, message: `Active speech type updated to "${speechType}"` };
+        found = true;
+        break;
       }
     }
     
-    // If not found, add it
-    const lastRow = settingsSheet.getLastRow();
-    settingsSheet.getRange(lastRow + 1, 1, 1, 2).setValues([['ActiveSpeechType', speechType]]);
+    if (!found) {
+      const lastRow = settingsSheet.getLastRow();
+      settingsSheet.getRange(lastRow + 1, 1, 1, 2).setValues([['ActiveSpeechType', speechType]]);
+    }
     return { success: true, message: `Active speech type set to "${speechType}"` };
   } catch (error) {
     console.error("Error setting active speech type:", error);
-    return { success: false, message: "Error: " + error.toString() };
+    return { success: false, message: "Error setting active speech type: " + error.toString() };
   }
 }
 
 // Load student data from the Index tab
 function loadStudentData() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const indexSheet = ss.getSheetByName('Index');
-  
-  // Get all data from the Index sheet
-  const data = indexSheet.getDataRange().getValues();
-  
-  // Skip the header row (row 1)
-  studentData = [];
-  for (let i = 1; i < data.length; i++) {
-    // Only add if there's a non-empty name in column A
-    if (data[i][0] && data[i][0].toString().trim() !== '') {
-      studentData.push({
-        fullName: data[i][0],    // Column A for full name
-        email: data[i][1]        // Column B for email
-      });
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const indexSheet = ss.getSheetByName('Index');
+    if (!indexSheet) {
+      console.error("Index sheet not found. Student data and teacher email cannot be loaded.");
+      studentData = [];
+      teacherEmail = getTeacherEmail(); // Fallback to default if Index sheet is missing
+      return;
     }
+  
+    const data = indexSheet.getDataRange().getValues();
+    studentData = []; // Reset before loading
+
+    // Start from row 1 (index 1) to skip header
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] && data[i][0].toString().trim() !== '') { // Full Name in Column A
+        studentData.push({
+          fullName: data[i][0].toString().trim(), 
+          email: (data[i][1] || '').toString().trim() // Email in Column B
+        });
+      }
+    }
+  
+    studentData.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  
+    // Get teacher email from cell C2 (row 2, column 3)
+    if (data.length > 1 && data[1].length > 2 && data[1][2] && data[1][2].toString().trim() !== '') {
+      teacherEmail = data[1][2].toString().trim();
+    } else {
+      // Attempt to get from getTeacherEmail as a fallback, which itself has a default
+      teacherEmail = getTeacherEmail(); // Ensures it uses the constant if C2 is empty
+      console.warn("Teacher email not found in Index sheet C2. Using fallback/default.");
+    }
+    console.log("Student data loaded. Count:", studentData.length, "Teacher Email:", teacherEmail);
+
+  } catch (error) {
+    console.error("Error loading student data:", error);
+    studentData = []; // Ensure it's empty on error
+    teacherEmail = DEFAULT_TEACHER_EMAIL; // Use defined default on error
   }
-  
-  // Sort the student data alphabetically by fullName
-  studentData.sort((a, b) => a.fullName.localeCompare(b.fullName));
-  
-  // Get teacher email from cell C2 (based on your spreadsheet structure)
-  teacherEmail = data.length > 1 && data[1].length > 2 ? data[1][2] : '';
 }
+
 
 // Return student data to the client-side JavaScript
 function getStudentData() {
-  loadStudentData(); // Refresh data
+  if (!studentData || studentData.length === 0) { // Ensure data is loaded if not already
+      loadStudentData();
+  }
   return studentData;
 }
 
 function processForm(formData) {
   try {
-    console.log("Process form started with data:", JSON.stringify(formData));
+    console.log("Process form (for saving data) started with data:", JSON.stringify(formData));
     
-    // Validate required fields
-    if (!formData.evaluatorName || !formData.presenterName || !formData.speechType) {
-      return { success: false, message: "Missing required fields: evaluator, presenter, or speech type" };
+    // Basic validation - can be enhanced by checking against speechConfiguration if needed
+    if (!formData.speechType || !formData.evaluatorName || !formData.presenterName) {
+        // 'evaluatorName' and 'presenterName' might not be universally required for all form types
+        // but speechType is essential.
+        // If 'evaluatorName' and 'presenterName' are dynamic, this check might be too strict here.
+        // For now, keeping it as it was often a base requirement.
+      return { success: false, message: "Missing critical fields (e.g., speech type, evaluator, presenter)." };
     }
     
-    // Save to the appropriate sheet based on speech type
-    saveToSheet(formData);
+    const saveResult = saveToSheet(formData); // Using the improved saveToSheet
+    if (!saveResult.success) {
+        return { success: false, message: saveResult.message || "Failed to save data to sheet."};
+    }
+    
+    // DO NOT SEND INDIVIDUAL EMAIL HERE.
+    // Emails with summaries/averages are sent via FeedbackMenu.gs -> FeedbackProcessor.gs
+    console.log("Form data saved successfully. Summary emails are sent via menu options.");
     
     return { success: true, message: "Your evaluation has been submitted successfully!" };
   } catch (error) {
-    console.error("Process form error:", error.toString());
-    return { success: false, message: "Error: " + error.toString() };
+    console.error("Process form error:", error.toString(), error.stack);
+    return { success: false, message: "Error processing form: " + error.toString() };
   }
 }
 
-// Updated sendEmails function 
-function sendEmails(formData) {
-  // Force reload student data
-  loadStudentData();
-  
-  // Find presenter email
-  const presenterEmail = findPresenterEmail(formData.presenterName);
-  
-  if (!presenterEmail) {
-    console.error("Failed to find email for presenter: " + formData.presenterName);
-  } else {
-    console.log("Found presenter email: " + presenterEmail);
-  }
-  
-  // Create email content
-  const subject = 'Speech Evaluation: ' + formData.presenterName + ' (evaluated by ' + formData.evaluatorName + ')';
-  const body = createEmailBody(formData);
-  
-  // Send email to teacher
-  if (teacherEmail) {
-    try {
-      MailApp.sendEmail({
-        to: teacherEmail,
-        subject: subject,
-        htmlBody: createHtmlEmailBody(formData)
-      });
-      console.log("Email sent to teacher: " + teacherEmail);
-    } catch (e) {
-      console.error("Error sending email to teacher: " + e.toString());
+/*
+/**
+ * Sends an email notification for an individual form submission.
+ * This is different from the summary emails sent via FeedbackProcessor.gs.
+ * @param {Object} formData The data from the submitted form.
+ * @return {Object} An object indicating success or failure of email sending.
+ 
+function sendIndividualSubmissionEmail(formData) {
+  try {
+    loadStudentData(); // Ensure studentData and teacherEmail global are fresh
+
+    const speechConfiguration = getSpeechConfiguration(formData.speechType);
+    if (speechConfiguration.error) {
+      console.error("Cannot send individual email, speech configuration error:", speechConfiguration.error);
+      return { success: false, message: "Speech configuration error for email." };
     }
-  }
-  
-  // Send email to presenter
-  if (presenterEmail) {
-    try {
-      MailApp.sendEmail({
-        to: presenterEmail,
-        cc: teacherEmail, // CC the teacher on presenter emails
-        subject: subject,
-        htmlBody: createHtmlEmailBody(formData)
-      });
-      console.log("Email sent to presenter: " + presenterEmail);
-    } catch (e) {
-      console.error("Error sending email to presenter: " + e.toString());
+
+    const presenterName = formData.presenterName;
+    const evaluatorName = formData.evaluatorName;
+    
+    const presenterEmail = findPresenterEmail(presenterName);
+    const currentTeacherEmail = getTeacherEmail(); // Use the robust getter
+
+    if (!presenterEmail && !currentTeacherEmail) {
+      console.warn("No recipient for individual submission email (presenter or teacher). Email not sent.");
+      return { success: false, message: "No recipient for email." };
     }
+
+    const subject = `New ${speechConfiguration.title || formData.speechType} Evaluation: ${presenterName} by ${evaluatorName}`;
+    const htmlBody = createDynamicIndividualEmailBody(formData, speechConfiguration, 'html');
+    // const textBody = createDynamicIndividualEmailBody(formData, speechConfiguration, 'text'); // For plain text version
+
+    const mailOptions = {
+      subject: subject,
+      htmlBody: htmlBody
+      // body: textBody // Uncomment if you want plain text part for multipart
+    };
+
+    let recipients = [];
+    if (presenterEmail) recipients.push(presenterEmail);
+    if (currentTeacherEmail) recipients.push(currentTeacherEmail); // Send to teacher as well or CC
+    
+    // De-duplicate recipients (e.g., if teacher is evaluating themselves, or presenter IS teacher)
+    recipients = [...new Set(recipients)]; 
+
+    if (recipients.length === 0) {
+        console.warn("No valid recipients for the individual submission email.");
+        return { success: false, message: "No valid email recipients."};
+    }
+
+    mailOptions.to = recipients.join(',');
+
+    MailApp.sendEmail(mailOptions);
+    console.log(`Individual submission email sent for ${presenterName} to: ${mailOptions.to}`);
+    return { success: true, message: "Notification email sent." };
+
+  } catch (e) {
+    console.error("Error sending individual submission email:", e.toString(), e.stack);
+    return { success: false, message: `Error sending email: ${e.toString()}` };
   }
 }
 
-// Create the HTML email body
-function createHtmlEmailBody(formData) {
-  // Process the rhetorical devices array
-  let rhetoricalDevices = 'None identified';
-  if (Array.isArray(formData.rhetoricalDevices) && formData.rhetoricalDevices.length > 0) {
-    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
-  } else if (typeof formData.rhetoricalDevices === 'string' && formData.rhetoricalDevices) {
-    try {
-      const parsed = JSON.parse(formData.rhetoricalDevices);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        rhetoricalDevices = parsed.join(', ');
+/**
+ * Creates a dynamic email body (HTML or Text) for an individual submission.
+ * @param {Object} formData The submitted form data.
+ * @param {Object} speechConfig The speech configuration object.
+ * @param {string} format 'html' or 'text'.
+ * @return {string} The generated email body.
+
+function createDynamicIndividualEmailBody(formData, speechConfig, format = 'html') {
+  let body = '';
+  const nl = format === 'html' ? '<br>' : '\n';
+  const h1Open = format === 'html' ? '<h1 style="color: #1a73e8;">' : '== ';
+  const h1Close = format === 'html' ? '</h1>' : ' ==';
+  const h2Open = format === 'html' ? '<h2 style="color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px;">' : '-- ';
+  const h2Close = format === 'html' ? '</h2>' : ' --';
+  const strongOpen = format === 'html' ? '<strong>' : '';
+  const strongClose = format === 'html' ? '</strong>' : '';
+  const pOpen = format === 'html' ? '<p>' : '';
+  const pClose = format === 'html' ? '</p>' : '';
+  const divOpen = format === 'html' ? '<div>' : '';
+  const divClose = format === 'html' ? '</div>' : '';
+  const commentOpen = format === 'html' ? '<div style="margin-left: 15px; padding: 5px; background-color: #f9f9f9; border-left: 2px solid #ccc;"><em>' : '> ';
+  const commentClose = format === 'html' ? '</em></div>' : '';
+
+
+  if (format === 'html') {
+    body += '<div style="font-family: Arial, sans-serif; max-width: 700px; margin: auto; padding: 15px; border: 1px solid #ddd;">';
+  }
+
+  body += `${h1Open}New ${speechConfig.title || formData.speechType} Evaluation Submitted${h1Close}${nl}${nl}`;
+  body += `${pOpen}${strongOpen}Speech/Presenter:${strongClose} ${formData.presenterName || 'N/A'}${pClose}`;
+  body += `${pOpen}${strongOpen}Evaluated By:${strongClose} ${formData.evaluatorName || 'N/A'}${pClose}`;
+  body += `${pOpen}${strongOpen}Timestamp:${strongClose} ${new Date().toLocaleString()}${pClose}${nl}`;
+
+  speechConfig.sections.forEach(section => {
+    // Skip the "Review Your Evaluation" section in the email body
+    if (section.title && section.title.toLowerCase().includes('review')) {
+      return; 
+    }
+
+    body += `${h2Open}${section.title}${h2Close}`;
+    section.questions.forEach(question => {
+      const questionId = question.id;
+      const questionText = question.text;
+      let value = formData[questionId] || "N/A";
+
+      // Special formatting for certain types
+      if (question.type.toLowerCase() === 'checkbox' && value !== "N/A") {
+        try {
+          const parsedValue = JSON.parse(value);
+          value = Array.isArray(parsedValue) ? parsedValue.join(', ') : value;
+          if (value === "") value = "None selected";
+        } catch (e) { / Ignore parsing error, use raw value  }
+      } else if (question.type.toLowerCase() === 'rubric' && value !== "N/A") {
+         value = `${value} / ${question.maxScore || 5}`; // Assume 5 if maxScore not in config for this question
+      } else if (question.type.toLowerCase() === 'comment' && (value === "N/A" || value.trim() === "" || value.trim() === "No comments provided")) {
+         value = "No comments provided."; // Standardize empty comment
       }
-    } catch (e) {
-      rhetoricalDevices = formData.rhetoricalDevices;
-    }
-  }
-
-  // Create HTML email content  
-  let html = `
-  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
-    <div style="background-color: #1a73e8; color: white; padding: 15px; border-radius: 5px 5px 0 0; margin: -20px -20px 20px;">
-      <h1 style="margin: 0; font-size: 22px;">Speech Evaluation Feedback</h1>
-    </div>
-    
-    <div style="color: #5f6368; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 10px;">
-      <p><strong>Speaker:</strong> ${formData.presenterName}</p>
-      <p><strong>Evaluated by:</strong> ${formData.evaluatorName}</p>
-      <p><strong>Initial Position:</strong> ${formData.initialPosition}</p>
-    </div>
-    
-    <div style="margin-bottom: 25px;">
-      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Speech Content</h2>
       
-      <p><strong>Body of Speech Score:</strong> ${formData.bodyScore}/4</p>
-      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
-        <p><strong>Comments:</strong> ${formData.bodyComments}</p>
-      </div>
-    </div>
-    
-    <div style="margin-bottom: 25px;">
-      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Diction & Rhetoric</h2>
-      
-      <p><strong>Diction Score:</strong> ${formData.dictionScore}/4</p>
-      <p><strong>Rhetorical Devices Used:</strong> ${rhetoricalDevices}</p>
-      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
-        <p><strong>Comments:</strong> ${formData.dictionComments}</p>
-      </div>
-    </div>
-    
-    <div style="margin-bottom: 25px;">
-      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Delivery</h2>
-      
-      <p><strong>Eye Contact Score:</strong> ${formData.eyeContactScore}/4</p>
-      <p><strong>Posture & Gestures Score:</strong> ${formData.postureScore}/4</p>
-      <p><strong>Vocal Variety Score:</strong> ${formData.vocalScore}/4</p>
-      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
-        <p><strong>Comments:</strong> ${formData.deliveryComments}</p>
-      </div>
-    </div>
-    
-    <div style="margin-bottom: 25px;">
-      <h2 style="color: #1a73e8; font-size: 18px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e0e0e0;">Impact & Feedback</h2>
-      
-      <p><strong>Position Change After Speech:</strong> ${formData.positionChange}</p>
-      <p><strong>Most Convincing Element:</strong> ${formData.mostConvincing}</p>
-      <p><strong>Least Convincing Element:</strong> ${formData.leastConvincing}</p>
-      <p><strong>What Was Done Well:</strong> ${formData.didWell}</p>
-      <p><strong>Area for Improvement:</strong> ${formData.improvement}</p>
-    </div>
-    
-    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #5f6368; text-align: center;">
-      <p>This is an automated message from the Speech Peer Evaluation System.</p>
-    </div>
-  </div>
-  `;
-  
-  return html;
-}
-
-// Create plain text email body (fallback)
-function createEmailBody(formData) {
-  let body = 'Speech Evaluation Summary\n\n';
-  
-  body += 'Evaluator: ' + formData.evaluatorName + '\n';
-  body += 'Presenter: ' + formData.presenterName + '\n\n';
-  
-  body += 'Initial Position: ' + formData.initialPosition + '\n\n';
-  
-  body += 'Body of Speech Score: ' + formData.bodyScore + '/4\n';
-  body += 'Comments: ' + formData.bodyComments + '\n\n';
-  
-  body += 'Diction and Rhetoric Score: ' + formData.dictionScore + '/4\n';
-  
-  // Process rhetorical devices
-  let rhetoricalDevices = 'None identified';
-  if (Array.isArray(formData.rhetoricalDevices) && formData.rhetoricalDevices.length > 0) {
-    rhetoricalDevices = formData.rhetoricalDevices.join(', ');
-  } else if (typeof formData.rhetoricalDevices === 'string' && formData.rhetoricalDevices) {
-    try {
-      const parsed = JSON.parse(formData.rhetoricalDevices);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        rhetoricalDevices = parsed.join(', ');
+      if (question.type.toLowerCase() === 'comment') {
+        body += `${divOpen}${strongOpen}${questionText}:${strongClose}${divClose}`;
+        body += `${commentOpen}${value}${commentClose}${nl}`;
+      } else {
+        body += `${divOpen}${strongOpen}${questionText}:${strongClose} ${value}${divClose}${nl}`;
       }
-    } catch (e) {
-      rhetoricalDevices = formData.rhetoricalDevices;
-    }
+    });
+    body += nl;
+  });
+
+  if (format === 'html') {
+    body += '<p style="font-size:0.9em; color:#777;">This is an automated notification.</p>';
+    body += '</div>'; // Close main container
   }
-  
-  body += 'Rhetorical Devices Used: ' + rhetoricalDevices + '\n';
-  body += 'Comments: ' + formData.dictionComments + '\n\n';
-  
-  body += 'Eye Contact Score: ' + formData.eyeContactScore + '/4\n';
-  body += 'Posture and Gestures Score: ' + formData.postureScore + '/4\n';
-  body += 'Vocal Variety Score: ' + formData.vocalScore + '/4\n';
-  body += 'Delivery Comments: ' + formData.deliveryComments + '\n\n';
-  
-  body += 'Position Change After Speech: ' + formData.positionChange + '\n';
-  body += 'Most Convincing Element: ' + formData.mostConvincing + '\n';
-  body += 'Least Convincing Element: ' + formData.leastConvincing + '\n\n';
-  
-  body += 'What the Presenter Did Well: ' + formData.didWell + '\n';
-  body += 'Suggestion for Improvement: ' + formData.improvement + '\n';
-  
   return body;
 }
 
+
+// OLD sendEmails function and its helpers are now effectively replaced by sendIndividualSubmissionEmail
+// and createDynamicIndividualEmailBody if immediate individual emails are desired.
+// The summary emails are handled by FeedbackProcessor.gs
+/*
+// Updated sendEmails function 
+function sendEmails(formData) { 
+  // This function is problematic if it's trying to use the OLD hardcoded email bodies.
+  // It should call a dynamic email body generator.
+  // For now, commenting out its content and relying on the new sendIndividualSubmissionEmail
+  console.warn("Old 'sendEmails' function called. Consider using 'sendIndividualSubmissionEmail'.");
+}
+
+// Create the HTML email body
+function createHtmlEmailBody(formData) { // OLD AND HARDCODED
+  console.error("Deprecated createHtmlEmailBody called. This function is hardcoded.");
+  // ... old hardcoded HTML ...
+  return "This email body is from a deprecated function and likely incorrect.";
+}
+
+// Create plain text email body (fallback)
+function createEmailBody(formData) { // OLD AND HARDCODED
+  console.error("Deprecated createEmailBody called. This function is hardcoded.");
+  // ... old hardcoded text ...
+  return "This email body is from a deprecated function and likely incorrect.";
+}
+*/
+
+
 // Updated saveToSheet function to handle speech-specific tabs
+
 function saveToSheet(formData) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (!ss) {
-      throw new Error("Could not access the active spreadsheet");
+    if (!ss) throw new Error("Could not access the active spreadsheet");
+
+    const targetSheetName = getSheetNameForSpeechType(formData.speechType); // Ensure this is correct casing from config
+    if (!targetSheetName) {
+      console.error(`Could not determine sheet name for speech type: ${formData.speechType}. Data not saved.`);
+      return { success: false, message: `Configuration error: Sheet name not found for ${formData.speechType}.` };
     }
-    
-    // Get the sheet name for this speech type
-    const sheetName = getSheetNameForSpeechType(formData.speechType);
-    
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) {
-      throw new Error(`Could not find sheet named '${sheetName}'`);
-    }
-    
-    // Create a timestamp
+
+    let sheet = ss.getSheetByName(targetSheetName);
     const timestamp = new Date();
-    
-    // Handle undefined or null values safely
-    const safeGet = (value, defaultValue = '') => {
-      return value !== undefined && value !== null ? value : defaultValue;
+    const safeGet = (value, defaultValue = '') => (value !== undefined && value !== null ? value : defaultValue);
+
+    // Define the core fields and their expected keys in formData
+    const coreFieldMapping = {
+      "Timestamp": () => timestamp, // Special handler
+      "EvaluatorName": () => safeGet(formData.evaluatorName), // formData key is camelCase
+      "PresenterName": () => safeGet(formData.presenterName), // formData key is camelCase
+      "SpeechType": () => safeGet(formData.speechType)      // formData key is camelCase
+      // Add other known critical fields here if their sheet header case might differ from formData key case
     };
-    
-    // Create row data starting with standard fields
-    const rowData = [
-      timestamp,
-      safeGet(formData.evaluatorName),
-      safeGet(formData.presenterName)
-    ];
-    
-    // Get headers from the sheet or create them if the sheet is empty
-    let headers;
-    if (sheet.getLastRow() === 0) {
-      // Sheet is empty, create headers
-      headers = ['Timestamp', 'EvaluatorName', 'PresenterName'];
-      
-      // Add all other form fields to headers
+
+    let actualSheetHeaders = [];
+
+    if (!sheet) {
+      sheet = ss.insertSheet(targetSheetName);
+      console.log(`Sheet "${targetSheetName}" did not exist and was created.`);
+      // For a new sheet, create headers using the PascalCase keys from coreFieldMapping
+      // and then any other keys from formData.
+      actualSheetHeaders = [...Object.keys(coreFieldMapping)];
       Object.keys(formData).forEach(key => {
-        if (!['evaluatorName', 'presenterName', 'speechType'].includes(key)) {
-          headers.push(key);
+        // Add formData keys if they don't correspond to a coreFieldMapping sheet header
+        // (e.g. "evaluatorName" key from formData won't be added again if "EvaluatorName" is already in actualSheetHeaders)
+        // This logic needs to be careful not to add camelCase versions if PascalCase is already there.
+        const pascalKey = key.charAt(0).toUpperCase() + key.slice(1);
+        if (!actualSheetHeaders.includes(key) && !actualSheetHeaders.includes(pascalKey)) {
+          // Default to adding the header as it appears in formData if not a mapped core field
+          actualSheetHeaders.push(key); 
         }
       });
-      
-      sheet.appendRow(headers);
+      sheet.appendRow(actualSheetHeaders);
+      sheet.getRange(1, 1, 1, actualSheetHeaders.length).setFontWeight('bold');
     } else {
-      // Get existing headers
-      headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    }
-    
-    // Add other form data based on headers
-    for (let i = 3; i < headers.length; i++) {
-      const fieldName = headers[i];
-      if (formData[fieldName] !== undefined) {
-        rowData.push(formData[fieldName]);
+      if (sheet.getLastRow() === 0) { // Sheet exists but is empty
+        // Behave like a new sheet regarding headers
+        actualSheetHeaders = [...Object.keys(coreFieldMapping)];
+        Object.keys(formData).forEach(key => {
+            const pascalKey = key.charAt(0).toUpperCase() + key.slice(1);
+             if (!actualSheetHeaders.find(h => h.toLowerCase() === key.toLowerCase())) {
+                actualSheetHeaders.push(key); // Add if no case-insensitive match found
+            }
+        });
+        sheet.appendRow(actualSheetHeaders);
+        sheet.getRange(1, 1, 1, actualSheetHeaders.length).setFontWeight('bold');
       } else {
-        rowData.push('');
+        actualSheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
       }
     }
+
+    // Verify essential headers (case-insensitive check for presence)
+    const lowerCaseSheetHeaders = actualSheetHeaders.map(h => h.toLowerCase());
+    Object.keys(coreFieldMapping).forEach(expectedHeader => {
+        if (!lowerCaseSheetHeaders.includes(expectedHeader.toLowerCase())) {
+            console.warn(`Expected header (or case-variant) "${expectedHeader}" was missing from sheet "${targetSheetName}". This might cause issues.`);
+            // For full robustness, you could add missing essential columns here, then re-fetch headers.
+            // For now, this warning is important. If it's "SpeechType", it's a problem.
+        }
+    });
+
+    const rowData = [];
+    actualSheetHeaders.forEach(sheetHeader => {
+      if (coreFieldMapping[sheetHeader]) { // Check if it's a core field with PascalCase sheet header
+        rowData.push(coreFieldMapping[sheetHeader]());
+      } else if (coreFieldMapping[sheetHeader.charAt(0).toUpperCase() + sheetHeader.slice(1)] && 
+                 sheetHeader.toLowerCase() === (sheetHeader.charAt(0).toUpperCase() + sheetHeader.slice(1)).toLowerCase() ) {
+        // This handles if sheetHeader is camelCase but coreFieldMapping uses PascalCase
+        rowData.push(coreFieldMapping[sheetHeader.charAt(0).toUpperCase() + sheetHeader.slice(1)]());
+      }
+      else if (formData.hasOwnProperty(sheetHeader)) { // Exact match for other fields
+        rowData.push(safeGet(formData[sheetHeader]));
+      } else if (formData.hasOwnProperty(sheetHeader.toLowerCase())) { // Try lowercase key from formData
+        rowData.push(safeGet(formData[sheetHeader.toLowerCase()]));
+      } else {
+        // If a header exists in sheet but not in formData and not a core field, push empty
+        rowData.push(''); 
+        console.log(`Header "${sheetHeader}" found in sheet but not in formData nor as a core mapped field. Pushing empty value.`);
+      }
+    });
     
-    // Append the row to the sheet
     sheet.appendRow(rowData);
-    console.log(`Row successfully appended to "${sheetName}" sheet`);
-    
-    return true;
+    console.log(`Row successfully appended to "${targetSheetName}" sheet for speech type "${formData.speechType}".`);
+    return { success: true };
+
   } catch (error) {
-    console.error("Save to sheet error:", error.toString());
-    throw error;
+    console.error("Save to sheet error:", error.toString(), error.stack);
+    return { success: false, message: `Error saving to sheet: ${error.toString()}` };
   }
 }
-
-// Add this function to your Code.gs file
+// Function to include HTML partials (like Stylesheet.css)
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
 // Find a presenter's email from their full name
 function findPresenterEmail(fullName) {
-  console.log("Looking for email for presenter: " + fullName);
-  console.log("Current student data: " + JSON.stringify(studentData));
-  
-  // Force reload student data to ensure it's fresh
-  loadStudentData();
-  console.log("Refreshed student data: " + JSON.stringify(studentData));
-  
-  for (let i = 0; i < studentData.length; i++) {
-    if (studentData[i].fullName === fullName) {
-      console.log("Found email for " + fullName + ": " + studentData[i].email);
-      return studentData[i].email;
-    }
+  if (!studentData || studentData.length === 0) {
+      loadStudentData(); // Ensure data is loaded
   }
   
-  console.log("No email found for: " + fullName);
-  return '';
+  const student = studentData.find(s => s.fullName === fullName);
+  if (student && student.email) {
+    console.log(`Found email for ${fullName}: ${student.email}`);
+    return student.email;
+  }
+  
+  console.warn(`No email found for presenter: ${fullName}. Current student data count: ${studentData.length}`);
+  return ''; // Return empty string if not found
 }
+
 
 // Get speech configuration from Templates sheet
 function getSpeechConfiguration(speechType) {
@@ -426,234 +472,163 @@ function getSpeechConfiguration(speechType) {
     const templateSheet = ss.getSheetByName('Templates');
     
     if (!templateSheet) {
-      return { error: "Templates sheet not found" };
+      return { error: "Templates sheet not found. Cannot build form." };
     }
     
-    // Get all template data
     const data = templateSheet.getDataRange().getValues();
-    const headers = data[0];
+    if (data.length < 1) {
+        return { error: "Templates sheet is empty."};
+    }
+    const headers = data[0].map(h => h.toString().trim());
     
-    // Create column index map
     const colIdx = {};
-    headers.forEach((header, index) => {
-      colIdx[header] = index;
-    });
+    headers.forEach((header, index) => { colIdx[header] = index; });
     
-    // Required columns
-    const requiredColumns = ['SpeechType', 'SheetName', 'SectionID', 'SectionTitle'];
+    const requiredColumns = ['SpeechType', 'SectionID', 'SectionTitle', 'QuestionID', 'QuestionText', 'QuestionType'];
     for (const col of requiredColumns) {
       if (!(col in colIdx)) {
-        return { error: `Required column '${col}' not found in Templates sheet` };
+        return { error: `Required column '${col}' not found in Templates sheet. Present headers: ${headers.join(', ')}` };
       }
     }
     
-    // Filter for requested speech type
-    const configRows = data.slice(1).filter(row => 
-      row[colIdx.SpeechType] === speechType
-    );
+    const configRows = data.slice(1).filter(row => row[colIdx.SpeechType] === speechType);
     
     if (configRows.length === 0) {
-      return { error: `No configuration found for speech type: ${speechType}` };
+      return { error: `No configuration found for speech type: "${speechType}" in Templates sheet.` };
     }
     
-    // Organize by sections
-    const sections = {};
+    const sectionsMap = new Map(); // Use Map to maintain insertion order for sections if IDs are not purely numeric
+    let formTitle = `${speechType.charAt(0).toUpperCase() + speechType.slice(1)} Speech Evaluation`; // Default title
     
     configRows.forEach(row => {
-      const sectionId = row[colIdx.SectionID];
-      const sectionTitle = row[colIdx.SectionTitle];
-      const questionId = row[colIdx.QuestionID];
+      const sectionId = row[colIdx.SectionID].toString(); // Ensure ID is a string for map keys
       
-      // Initialize section if it doesn't exist
-      if (!sections[sectionId]) {
-        sections[sectionId] = {
-          id: sectionId,
-          title: sectionTitle,
+      if (!sectionsMap.has(sectionId)) {
+        sectionsMap.set(sectionId, {
+          id: sectionId, // Store original ID, could be numeric or string
+          title: row[colIdx.SectionTitle],
           questions: []
-        };
+        });
+        // Check for a form-level title if provided in a specific way (e.g. first row for a speechType)
+        if (row[colIdx.FormTitle] && sectionsMap.size === 1) { // Example: if FormTitle column exists
+            formTitle = row[colIdx.FormTitle];
+        }
       }
       
-      // Skip if this row is just defining a section without a question
-      if (!questionId) return;
+      const questionId = row[colIdx.QuestionID];
+      if (!questionId) return; // Row might be for section definition only
       
-      // Parse options
       let options = [];
       if (colIdx.Options !== undefined && row[colIdx.Options]) {
-        // Try to parse as JSON first
-        try {
-          options = JSON.parse(row[colIdx.Options]);
-        } catch (e) {
-          // If that fails, split by pipe
-          options = row[colIdx.Options].split('|').map(opt => opt.trim());
-        }
+        const optStr = row[colIdx.Options].toString();
+        try { options = JSON.parse(optStr); } 
+        catch (e) { options = optStr.split('|').map(opt => opt.trim()).filter(o => o); }
       }
       
-      // Parse score criteria
       let scoreCriteria = [];
       if (colIdx.ScoreCriteria !== undefined && row[colIdx.ScoreCriteria]) {
-        // Try to parse as JSON first
-        try {
-          scoreCriteria = JSON.parse(row[colIdx.ScoreCriteria]);
-        } catch (e) {
-          // If that fails, split by pipe
-          scoreCriteria = row[colIdx.ScoreCriteria].split('|').map(crit => crit.trim());
-        }
+        const critStr = row[colIdx.ScoreCriteria].toString();
+        try { scoreCriteria = JSON.parse(critStr); } 
+        catch (e) { scoreCriteria = critStr.split('|').map(crit => crit.trim()).filter(c => c); }
       }
       
-      // Get question properties
-      const questionType = colIdx.QuestionType !== undefined ? row[colIdx.QuestionType] : '';
-      const questionText = colIdx.QuestionText !== undefined ? row[colIdx.QuestionText] : '';
-      const required = colIdx.Required !== undefined ? 
-        (row[colIdx.Required] === true || row[colIdx.Required] === 'TRUE' || row[colIdx.Required] === 'true') : false;
-      const defaultValue = colIdx.DefaultValue !== undefined ? row[colIdx.DefaultValue] : '';
-      const minScore = colIdx.MinScore !== undefined ? row[colIdx.MinScore] : '';
-      const maxScore = colIdx.MaxScore !== undefined ? row[colIdx.MaxScore] : '';
-      
-      // Add question to section
-      sections[sectionId].questions.push({
-        id: questionId,
-        type: questionType,
-        text: questionText,
+      sectionsMap.get(sectionId).questions.push({
+        id: questionId.toString(),
+        type: row[colIdx.QuestionType].toString(),
+        text: row[colIdx.QuestionText].toString(),
         options: options,
-        required: required,
-        defaultValue: defaultValue,
-        minScore: minScore,
-        maxScore: maxScore,
+        required: colIdx.Required !== undefined ? /true/i.test(row[colIdx.Required].toString()) : false,
+        defaultValue: colIdx.DefaultValue !== undefined ? row[colIdx.DefaultValue].toString() : '',
+        minScore: colIdx.MinScore !== undefined ? row[colIdx.MinScore].toString() : '1',
+        maxScore: colIdx.MaxScore !== undefined ? row[colIdx.MaxScore].toString() : '5',
         scoreCriteria: scoreCriteria
       });
     });
     
-    // Convert to array and sort by section ID
-    const sectionsArray = Object.values(sections).sort((a, b) => {
-      // Convert to numbers if possible, otherwise compare as strings
-      const aId = !isNaN(a.id) ? Number(a.id) : a.id;
-      const bId = !isNaN(b.id) ? Number(b.id) : b.id;
-      
-      if (typeof aId === 'number' && typeof bId === 'number') {
-        return aId - bId;
-      }
-      return String(aId).localeCompare(String(bId));
+    // Convert sections map to array, preserving order if IDs are sortable
+    // If section IDs are numbers, sort numerically. Otherwise, by insertion order (Map behavior) or string sort.
+    const sectionsArray = Array.from(sectionsMap.values()).sort((a, b) => {
+        const aIsNum = !isNaN(parseFloat(a.id)) && isFinite(a.id);
+        const bIsNum = !isNaN(parseFloat(b.id)) && isFinite(b.id);
+        if (aIsNum && bIsNum) return parseFloat(a.id) - parseFloat(b.id);
+        if (aIsNum && !bIsNum) return -1;
+        if (!aIsNum && bIsNum) return 1;
+        return a.id.localeCompare(b.id); // Fallback to string locale compare for non-numeric IDs
     });
     
     return {
       speechType: speechType,
-      title: `${speechType.charAt(0).toUpperCase() + speechType.slice(1)} Speech Evaluation`,
+      title: formTitle,
       sections: sectionsArray
     };
   } catch (error) {
-    console.error("Error getting speech configuration:", error);
-    return { error: "Error: " + error.toString() };
+    console.error(`Error getting speech configuration for "${speechType}":`, error, error.stack);
+    return { error: "Error getting speech configuration: " + error.toString() };
   }
 }
 
+
 // Get all available speech types and their sheet names from Templates
 function getAvailableSpeechTypes() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const templateSheet = ss.getSheetByName('Templates');
-  
-  if (!templateSheet) {
-    console.error("Templates sheet not found");
-    return [];
-  }
-  
-  // Get all template data
-  const data = templateSheet.getDataRange().getValues();
-  const headers = data[0];
-  
-  // Find column indices
-  const speechTypeColIndex = headers.indexOf('SpeechType');
-  const sheetNameColIndex = headers.indexOf('SheetName');
-  
-  if (speechTypeColIndex === -1 || sheetNameColIndex === -1) {
-    console.error("Required columns not found in Templates sheet");
-    return [];
-  }
-  
-  // Get unique speech types and their sheet names
-  const speechTypes = {};
-  
-  // Start from row 1 (skipping header)
-  for (let i = 1; i < data.length; i++) {
-    const speechType = data[i][speechTypeColIndex];
-    const sheetName = data[i][sheetNameColIndex];
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const templateSheet = ss.getSheetByName('Templates');
     
-    if (speechType && sheetName) {
-      speechTypes[speechType] = sheetName;
+    if (!templateSheet) {
+      console.error("Templates sheet not found. Cannot get available speech types.");
+      return {}; // Return empty object
     }
+    
+    const data = templateSheet.getDataRange().getValues();
+    if (data.length < 2) return {}; // No data beyond headers
+
+    const headers = data[0].map(h => h.toString().trim());
+    const speechTypeColIndex = headers.indexOf('SpeechType');
+    const sheetNameColIndex = headers.indexOf('SheetName'); // This column defines the target data sheet
+    
+    if (speechTypeColIndex === -1) { // SheetName is optional, can be derived
+      console.error("'SpeechType' column not found in Templates sheet.");
+      return {};
+    }
+    
+    const speechTypesMap = {}; // Use a map to store speechType -> sheetName
+    for (let i = 1; i < data.length; i++) {
+      const speechType = data[i][speechTypeColIndex];
+      if (speechType && speechType.toString().trim() !== "") {
+        let sheetName = null;
+        if (sheetNameColIndex !== -1 && data[i][sheetNameColIndex] && data[i][sheetNameColIndex].toString().trim() !== "") {
+            sheetName = data[i][sheetNameColIndex].toString().trim();
+        } else {
+            // Default sheet name generation if not specified
+            sheetName = speechType.toString().trim().charAt(0).toUpperCase() + speechType.toString().trim().slice(1) + " Evaluations";
+        }
+        speechTypesMap[speechType.toString().trim()] = sheetName;
+      }
+    }
+    return speechTypesMap;
+  } catch (error) {
+      console.error("Error getting available speech types:", error);
+      return {};
   }
-  
-  return speechTypes;
 }
 
 // Get sheet name for a given speech type
 function getSheetNameForSpeechType(speechType) {
-  // Get all speech types and their sheet names
-  const speechTypes = getAvailableSpeechTypes();
-  
-  // Return the sheet name if found
+  const speechTypes = getAvailableSpeechTypes(); // This now returns a map: { speechType: sheetName }
   if (speechTypes[speechType]) {
     return speechTypes[speechType];
   }
-  
-  // Fallback: Generate a sheet name based on the speech type
-  return speechType.charAt(0).toUpperCase() + speechType.slice(1) + " Speech";
+  // Fallback if not in Templates (should ideally not happen if config is well-maintained)
+  console.warn(`Sheet name for speech type "${speechType}" not found in Templates. Generating default name.`);
+  return speechType.charAt(0).toUpperCase() + speechType.slice(1) + " Evaluations"; // Consistent default
 }
 
 /*
-// Diagnostic function to test if we can access the spreadsheet and sheet
+// Diagnostic functions (keep commented out unless debugging)
 function debugSheetAccess() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (!ss) {
-      return { success: false, message: "Could not access the active spreadsheet" };
-    }
-    
-    const sheetNames = ss.getSheets().map(sheet => sheet.getName());
-    
-    const peerEvalSheet = ss.getSheetByName('Peer Evaluations');
-    if (!peerEvalSheet) {
-      return { 
-        success: false, 
-        message: "Could not find 'Peer Evaluations' sheet",
-        availableSheets: sheetNames
-      };
-    }
-    
-    // Try to write a test row
-    try {
-      const testRow = ["TEST", "Diagnostic Test", new Date(), "Please delete this row"];
-      peerEvalSheet.appendRow(testRow);
-      return { 
-        success: true, 
-        message: "Successfully accessed spreadsheet and appended test row",
-        sheetId: ss.getId(),
-        sheetUrl: ss.getUrl(),
-        sheetNames: sheetNames
-      };
-    } catch (writeError) {
-      return {
-        success: false,
-        message: "Could access spreadsheet but failed to write: " + writeError.toString(),
-        sheetNames: sheetNames
-      };
-    }
-  } catch (error) {
-    return { success: false, message: "Error: " + error.toString() };
-  }
+  // ...
 }
-
-// Function to log student data for debugging
 function debugStudentData() {
-  loadStudentData();
-  
-  const studentInfo = studentData.map(student => ({
-    name: student.fullName,
-    email: student.email
-  }));
-  
-  console.log("Student data loaded:");
-  console.log(JSON.stringify(studentInfo, null, 2));
-  
-  return studentInfo;
+  // ...
 }
 */
